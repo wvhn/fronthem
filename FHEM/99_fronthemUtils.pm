@@ -771,7 +771,7 @@ sub Plotfile(@)
 			pop @resonse;
 			
 			for (my $i = 0; $i < @resonse; $i++) {			
-				$resonse[$i] =~ /([0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2})\s+([0-9\.]+)/;					
+				$resonse[$i] =~ /([0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2})\s+([0-9\.-]+)/;				
 				push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($1));
 				push(@{$data[0]->{plotdata}[$i]}, sprintf("%#.4f", $2) * 1);
 			}
