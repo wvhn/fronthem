@@ -655,7 +655,7 @@ sub Plot(@)
 				$duration = main::fronthem_Duration($start);
 			}
 				
-			my $string = main::fhem('get ' . $args[0] . ' - webchart ' . $from . ' ' . $to . ' ' . $device . ' ' . $duration . ' TIMESTAMP ' . $reading);
+			my $string = main::CommandGet(undef, $args[0] . ' - webchart ' . $from . ' ' . $to . ' ' . $device . ' ' . $duration . ' TIMESTAMP ' . $reading);
 			my @resonse = main::fronthem_decodejson($string);
 
 			foreach my $data (@resonse) {
