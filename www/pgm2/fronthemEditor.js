@@ -64,7 +64,7 @@ function sveRefreshGADList(device, gadList) {
   keys.sort();
   insert.push('<input id="filterTable_input">');
   insert.push('<table id="gadlisttable" style="width:636px">');
-  insert.push('<thead><tr><th></th><th>gad</th><th>device</th><th>r</th><th>w</th></tr></thead><tbody id="gadlisttablebody">');
+  insert.push('<thead><tr><th></th><th>item</th><th>device</th><th>r</th><th>w</th></tr></thead><tbody id="gadlisttablebody">');
   //$.each(gad, function(i, item) {
   //  insert.push('<tr id=' + i + ' style="cursor:pointer"><td><a>' + i + '</a></td><td>nnn</td></tr>');
   //});
@@ -149,6 +149,16 @@ function sveShowGADEditor(device, gadName, gadItem) {
       $('#gadeditcontainer').finish();
       sveGADEditorItem(device, gadName, gad);
       break;
+	case 'log':
+	  console.log('log');
+	  $('#gadeditcontainer').finish();
+      sveGADEditorItem(device, gadName, gad);
+	  break;
+	case 'plot':
+	  console.log('plot');
+	  $('#gadeditcontainer').finish();
+      sveGADEditorItem(device, gadName, gad);
+	  break;
     default:
       sveGADEditorTypeSelect(device, gadName, gad);
       break;
@@ -179,8 +189,8 @@ function sveGADEditorItem(device, gadName, gad) {
   $('#gadeditor').append('<tr><td>' + 'cmd set' + '</td><td align="right"><input id="gadEditSet" type="text" size="55" value="' + gad.set +'"/></td></tr>');
   $('#gadeditor').append('<tr class="permission"><td>&nbsp;</td><td>&nbsp;</td></tr>');
   $('#gadeditor').append('<tr class="permission"><th colspan="2">permission for ' + device + '</th></tr>');
-  $('#gadeditor').append('<tr class="permission"><td ><input type="checkbox" id="gadEditRead" ' + gad.read + '>read</td><td align="right"> PIN GAD: <input type="text" size="45" id="gadEditReadConverter" value="kommt später"></td>');
-  $('#gadeditor').append('<tr class="permission"><td ><input type="checkbox" id="gadEditWrite" ' + gad.write + '>write</td><td align="right"> PIN GAD: <input type="text" size="45" id="gadEditWriteConverter" value="auch ;-)"></td>');
+  $('#gadeditor').append('<tr class="permission"><td ><input type="checkbox" id="gadEditRead" ' + gad.read + '>read</td><td align="right"> PIN Item: <input type="text" size="45" id="gadEditReadConverter" value="kommt später"></td>');
+  $('#gadeditor').append('<tr class="permission"><td ><input type="checkbox" id="gadEditWrite" ' + gad.write + '>write</td><td align="right"> PIN Item: <input type="text" size="45" id="gadEditWriteConverter" value="auch ;-)"></td>');
   
   if (gad.whitelist === 'false') $('.permission').hide();
 
@@ -316,6 +326,7 @@ function sveGADEdtorAddTypeSelect(device, gadName, gad) {
   $('#gadeditor').append('<tr><td>' + 'mode' + '</td><td><select id="gadEditTypeSelect"/></td></tr>');
   $('<option/>').val('item').text('item').appendTo('#gadEditTypeSelect');
   $('<option/>').val('plot').text('plot').appendTo('#gadEditTypeSelect');
+  $('<option/>').val('log').text('log').appendTo('#gadEditTypeSelect');
   $('#gadEditTypeSelect').val(gad.editor);
 }
 

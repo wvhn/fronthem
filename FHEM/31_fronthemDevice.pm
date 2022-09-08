@@ -1,6 +1,6 @@
 ##############################################
-# $Id: 31_fronthemDevice.pm 21 2015-02-13 20:25:09Z. herrmannj $
-
+# $Id: 31_fronthemDevice.pm 21 2015-02-13 20:25:09Z herrmannj $
+# modified: 2018-04-14 00:0:00Z raman
 # open:
 # getAllSets(devName)
 # num converter with negative values
@@ -10,6 +10,7 @@ package main;
 
 use strict;
 use warnings;
+use Time::HiRes qw(gettimeofday);
 
 use JSON;
 use utf8;
@@ -32,8 +33,8 @@ fronthemDevice_Initialize(@)
   $hash->{UndefFn}      = "fronthemDevice_Undef";
   $hash->{ShutdownFn}   = "fronthemDevice_Shutdown";
   $hash->{FW_detailFn}  = "fronthemDevice_fwDetail";
-  $hash->{AttrList}     = "configFile ".
-                           "whitelist:true,false ".$readingFnAttributes;
+  $hash->{AttrList}     = "configFile " .
+                          "whitelist:true,false ".$readingFnAttributes;
 
   $data{FWEXT}{fronthemDevice}{SCRIPT}  = "fronthemEditor.js";
 }
@@ -144,7 +145,7 @@ fronthemDevice_Get(@)
       1;
     } or do {
       my $e = $@;
-      Log3 ($hash->{NAME}, 1, "Error decoding webif-data $e: ".join(' ',@args));
+      log3 ($hash->{NAME}, 1, "Error decoding webif-data $e: ".join(' ',@args));
       return undef;
     };
 
@@ -253,9 +254,10 @@ sub fronthemDevice_ValidateGAD(@)
 
   my $result = '';
   my $gadItem = $transfer->{item};
+   
   if (!defined($defs{$hash->{helper}->{gateway}}->{helper}->{config}->{$transfer->{item}}))
   {
-    Log3 ($hash, 2, "gadModeSelect with unknown GAD $gadItem");
+    Log3 ($hash, 2, "gadModeSelect with unknown ITEM $gadItem");
   }
   my $gadAtGateway = $defs{$hash->{helper}->{gateway}}->{helper}->{config}->{$transfer->{item}};
 
@@ -263,9 +265,9 @@ sub fronthemDevice_ValidateGAD(@)
   $hash->{helper}->{config}->{$gadItem}->{read} = ($transfer->{config}->{read} eq '1')?1:0;
   $hash->{helper}->{config}->{$gadItem}->{write} = ($transfer->{config}->{write} eq '1')?1:0;
 
-  if ($transfer->{editor} eq 'item')
+  if ($transfer->{editor} eq 'item' || $transfer->{editor} eq 'log' || $transfer->{editor} eq 'plot')
   {
-    $gadAtGateway->{type} = 'item';
+	$gadAtGateway->{type} = $transfer->{editor};
     #device
     if ((defined($transfer->{config}->{device})) && length($transfer->{config}->{device}))
     {
@@ -313,45 +315,166 @@ sub
 fronthemDevice_Notify($$)
 {
   my ($hash, $ntfyDev) = @_;
+  
+  my $name = $hash->{NAME};
   my $ntfyDevName = $ntfyDev->{NAME};
-
+  
   # responde to fhem system events
   # INITIALIZED|REREADCFG|DEFINED|RENAMED|SHUTDOWN
   if ($ntfyDevName eq "global")
   {
-    foreach my $event (@{$ntfyDev->{CHANGED}})
+	my @events = deviceEvents($ntfyDev, 1);
+    foreach my $a (@events)
     {
-      my @e = split(' ', $event);
-      if ($e[0] eq 'INITIALIZED')
-      {
-        fronthemDevice_Start($hash);
-      }
-      elsif ($e[0] eq 'RENAMED')
-      {
-        # TODO see if it is my gateway
-        my $gateway = fronthemDevice_GetGateway($hash);
-        if ($gateway && ($gateway->{NAME} eq $e[1]))
-        {
-          Log3 ($hash, 4, "$hash->{NAME}:gatway $e[1] renamed to $e[2] - update settings");
-        }
-      }
+	  foreach  my $e (@{$a}) {
+		my @event = split(/\s/, $e);
+		
+		if ($event[0] eq 'INITIALIZED')
+		{
+			fronthemDevice_Start($hash);
+		}
+		elsif ($event[0] eq 'RENAMED')
+		{
+			# TODO see if it is my gateway
+			my $gateway = fronthemDevice_GetGateway($hash);
+			if ($gateway && ($gateway->{NAME} eq $event[1]))
+			{
+				Log3 ($hash, 4, "$hash->{NAME}:gatway $event[1] renamed to $event[2] - update settings");
+			}
+		}
+	  }
     }
   }
-
-  return undef if(AttrVal($hash->{NAME}, "disable", 0) == 1);
-  return undef unless (ReadingsVal($hash->{NAME}, 'state', 'disconnected') eq 'connected');
+  
+  return undef if (AttrVal($name, "disable", 0) == 1);
+  return undef unless (ReadingsVal($name, 'state', 'disconnected') eq 'connected');
 
   # TODO exit here if gateway is absend
-
-  my $result;
+  
+  if (defined($hash->{helper}->{gateway}) && exists($defs{$hash->{helper}->{gateway}}->{helper}->{plot}->{$ntfyDevName}) && InternalVal($name, "TYPE", "") eq "fronthemDevice")
+  {
+	my @events = deviceEvents($ntfyDev, 1);
+	my $listenDevice = $defs{$hash->{helper}->{gateway}}->{helper}->{plot}->{$ntfyDevName};
+	
+	if (@events) {
+		foreach  my $a (@events)
+		{	
+			foreach  my $reading (@{$a}) {
+				my @actualreading = split(/:\s|\s/, $reading);			
+				my $reading = shift @actualreading;		
+				my $listenDevice = $defs{$hash->{helper}->{gateway}}->{helper}->{plot}->{$ntfyDevName};
+		
+				if (defined($listenDevice->{$reading}))
+				{ 
+					foreach my $gad (keys %{$listenDevice->{$reading}})
+					{
+						my $gadCfg = $defs{$hash->{helper}->{gateway}}->{helper}->{config}->{$gad};
+						if($gadCfg->{type} eq 'plot' && $gadCfg->{reading} eq $reading)						
+						{
+							my $event = $actualreading[0];
+							my @converterArgs = split(/\s/, $gadCfg->{converter});
+							if (@converterArgs) {
+								my $converter = shift @converterArgs;
+								
+								if(@converterArgs >= 3) {
+									my $arg = $converterArgs[2];
+									if ("@actualreading" =~ /$arg\s([0-9.]+)/) {
+										$event = $1;
+									}
+								}
+							
+								my $counter = 1;
+								my @modes;										
+								if($gadCfg->{datamode} && $gadCfg->{datamode} ne $gadCfg->{mode}) {
+									if($gadCfg->{datamode} eq "minmaxavg") {
+									$counter = 3;
+									@modes = ('min','max','avg');	
+								} elsif($gadCfg->{datamode} eq "minmax") {
+									$counter = 2;
+									@modes = ('min','max');	
+								}
+								} else {
+									@modes = ($gadCfg->{mode});		
+								}
+						
+								for (my $i = 0; $i < $counter; $i++) {
+									my $param;
+									$param->{cmd} = 'plot';
+									$param->{gad} = $gad;
+									$param->{device} = $ntfyDevName;
+									$param->{reading} = $reading;
+									$param->{mode} = $modes[$i];
+									$param->{start} = $gadCfg->{start};
+									$param->{end} = $gadCfg->{end};
+									$param->{count} = $gadCfg->{count};
+									$param->{interval} = $gadCfg->{interval};
+									$param->{updatemode} = 'point';
+									$param->{datamode} = $gadCfg->{datamode};
+									$param->{event} = $event; 
+									@{$param->{events}} = @actualreading;
+									@{$param->{args}} = @converterArgs;
+									fronthemDevice_DoConverter($hash, $converter, $param);
+									if(@converterArgs == 1 && @modes == 1) {
+										last;
+									}
+								}				
+							}
+							
+						}						
+					}
+				}
+			}
+		}
+	}
+  }
+  
+  if (defined($hash->{helper}->{gateway}) && exists($defs{$hash->{helper}->{gateway}}->{helper}->{log}->{$ntfyDevName}) && InternalVal($name, "TYPE", "") eq "fronthemDevice")
+  {
+	my @events = deviceEvents($ntfyDev, 1);
+	my $listenDevice = $defs{$hash->{helper}->{gateway}}->{helper}->{log}->{$ntfyDevName};
+	
+	if (@events) {
+		foreach  my $a (@events)
+		{	
+			foreach  my $reading (@{$a}) {
+				my @actualreading = split(/:\s|\s/, $reading);			
+				my $reading = shift @actualreading;		
+				my $listenDevice = $defs{$hash->{helper}->{gateway}}->{helper}->{log}->{$ntfyDevName};
+		
+				if (defined($listenDevice->{$reading}) && $reading eq "state")
+				{ 
+					foreach my $gad (keys %{$listenDevice->{$reading}})
+					{
+						my $gadCfg = $defs{$hash->{helper}->{gateway}}->{helper}->{config}->{$gad};
+				
+						if($gadCfg->{type} eq 'log' && $gadCfg->{reading} eq $reading)
+						{
+							my ($converter, $p) = split(/\s+/, $gadCfg->{converter}, 2);
+							my $param;
+							$param->{cmd} = 'log';
+							$param->{gad} = $gad;
+							$param->{device} = $ntfyDevName;
+							$param->{reading} = $reading;						
+							$param->{size} = $gadCfg->{size};						
+							$param->{event} = $ntfyDev->{STATE};
+							@{$param->{args}} = split(/\s*,\s*/, $p || '');
+							fronthemDevice_DoConverter($hash, $converter, $param);
+							last;					
+						}
+					}
+				}
+			}
+		}
+	}
+  }
 
   #of interest, device is in global (context fronthem parent device) list of known device->reading->gad ?
-  if (defined($hash->{helper}->{gateway}) && exists($defs{$hash->{helper}->{gateway}}->{helper}->{listen}->{$ntfyDevName}))
+  if (defined($hash->{helper}->{gateway}) && (exists($defs{$hash->{helper}->{gateway}}->{helper}->{listen}->{$ntfyDevName}) ))
   {
     my $max = int(@{$ntfyDev->{CHANGED}});
     my $gateway = $hash->{helper}->{gateway}; # TODO getGateway 
     my $listenDevice = $defs{$gateway}->{helper}->{listen}->{$ntfyDevName};
-
+	
     for (my $i = 0; $i < $max; $i++) {
       my $s = $ntfyDev->{CHANGED}[$i];
       $s = "state: $s" if (($ntfyDevName ne 'global') && ($s !~ m/.+?:\s.*/));
@@ -360,8 +483,9 @@ fronthemDevice_Notify($$)
       # step back and see if there is a device-reading equal to $reading[0] 
       # to prevent false interpreting of events like (state) T: 21 H: 50
       @reading = ('state', $s) unless ( ($reading[0] eq 'state') || exists($ntfyDev->{READINGS}->{$reading[0]}) );
+	  	  
       if (defined($listenDevice->{$reading[0]}))
-      {
+      {  
         #global list of all gad using it
         foreach my $gad (keys %{$listenDevice->{$reading[0]}})
         {
@@ -407,6 +531,7 @@ fronthemDevice_DoConverter(@)
   #check local permissions
   my $gad = $param->{gad};
   my $cmd = $param->{cmd};
+   
   #cmd == get||send: device is allowed to read the via that gad ?
   if ($cmd =~ /get|send/)
   {
@@ -435,11 +560,37 @@ fronthemDevice_DoConverter(@)
     #  return undef if pad_pin_special_cache_entry != extracted pin from key
     #}
   }
+  if ($cmd eq 'log')
+  {
+    if (!$hash->{helper}->{config}->{$gad}->{read} && (AttrVal($hash->{NAME}, 'whitelist', 'true') eq 'true'))
+    {
+      Log3 ($hash, 3, "$hash->{NAME} no read permission for $gad");
+      return undef;
+    }
+    #TODO check pin assignment
+    #if (defined($hash->{helper}->{config}->{$gad}->{NAME_OF_GAD_THAT_IS_USED_TO_TEST}))
+    #{
+    #  return undef if pad_pin_special_cache_entry != extracted pin from key
+    #}
+  }
+  if ($cmd eq 'plot' || $cmd eq 'point')
+  {
+    if (!$hash->{helper}->{config}->{$gad}->{read} && (AttrVal($hash->{NAME}, 'whitelist', 'true') eq 'true'))
+    {
+      Log3 ($hash, 3, "$hash->{NAME} no read permission for $gad");
+      return undef;
+    }
+    #TODO check pin assignment
+    #if (defined($hash->{helper}->{config}->{$gad}->{NAME_OF_GAD_THAT_IS_USED_TO_TEST}))
+    #{
+    #  return undef if pad_pin_special_cache_entry != extracted pin from key
+    #}
+  }
   if (eval $convStr)
   {
     #if there is a return value from converter, the converter may have chosen thats nothing to do, done by itself or a error is risen
     return undef if ($result eq 'done');
-    return Log3 ($hash, 3, "$hash->{NAME}: $result");
+    return Log3 ($hash, 1, "$hash->{NAME}: $result !!!");
   }
   if ($@)
   {
@@ -455,13 +606,14 @@ fronthemDevice_DoConverter(@)
     fronthemDevice_toDriver($hash, $msg);
     return undef;
   }
-  elsif ($cmd = 'rcv')
+  elsif ($cmd eq 'rcv')
   {
     my $device = $param->{device};
     my $set = fronthemDevice_ConfigVal($hash, $gad, 'set');
     # exit here if no set is given
     return undef unless $set;
-    $set =~ s/^state// if ($set eq 'state');
+    #$set =~ s/^state// if ($param->{reading} eq 'state');
+	$set =~ s/^state// if ($set eq 'state');
     if ($set !~ /.*\$.*/)
     {
       fhem "set $device $set $param->{result}";
@@ -471,6 +623,15 @@ fronthemDevice_DoConverter(@)
     {
       #TODO eval with vars
     }
+  }
+  elsif ($cmd eq 'plot' || $cmd eq 'log' || $cmd eq 'url')
+  {
+	my $msg;
+    $msg->{receiver} = $hash->{NAME};
+    $msg->{message}->{cmd} = $cmd;
+    @{$msg->{message}->{items}} = @{$param->{gads}}?@{$param->{gads}}:($param->{gad}, $param->{gadval});
+    fronthemDevice_toDriver($hash, $msg);
+    return undef;
   }
 }
 
@@ -497,7 +658,7 @@ fronthemDevice_fwDetail(@)
   my $result = '';
 
   $result = "<div>\n";
-  $result .= "<table class=\"block wide \">\n";
+  $result .= "<table class=\"block wide\">\n";
   $result .= "<tr>\n";
   $result .= "<td>\n";
   $result .= "<div id=\"gadlist\" style=\"max-height: 200px; overflow-y: scroll;\"></div>\n";
@@ -510,7 +671,7 @@ fronthemDevice_fwDetail(@)
   $result .= "</div>\n";
   $result .= "<div id=\"gadeditcontainer\" style=\"display: none;\">\n";
   $result .= "<br>";
-  $result .= "GAD Edit\n";
+  $result .= "Edit Item\n";
   $result .= "<table class=\"block wide \">\n";
   $result .= "<tr>\n";
   $result .= "<td>\n";
@@ -519,7 +680,7 @@ fronthemDevice_fwDetail(@)
   $result .= "</tr>\n";
   $result .= "</table>\n";
   $result .= "</div>\n";
-  
+   
   return $result;
 }
 
@@ -534,7 +695,6 @@ fronthemDevice_ReadCfg(@)
   my $json_fh;
   open($json_fh, "<:encoding(UTF-8)", $cfgFile) and do
   {
-    #Log3 ($hash, 1, "$hash->{NAME}: Error loading cfg file $!");
     local $/;
     $json_text = <$json_fh>;
     close $json_fh;
@@ -661,7 +821,7 @@ fronthemDevice_fromDriver(@)
     return undef;
   }
   if ($msg->{message}->{cmd} eq 'item')
-  {
+  {	
     $hash->{helper}->{cache}->{$msg->{message}->{id}}->{val} = $msg->{message}->{val};
     $hash->{helper}->{cache}->{$msg->{message}->{id}}->{time} = gettimeofday();
     $hash->{helper}->{cache}->{$msg->{message}->{id}}->{count} += 1;
@@ -684,6 +844,48 @@ fronthemDevice_fromDriver(@)
     }
     return undef;
   }
+  if ($msg->{message}->{cmd} eq 'log')
+  {
+	$hash->{helper}->{log} = $msg->{message}->{items};
+    foreach my $gad (@{$hash->{helper}->{log}})
+    {
+		if (fronthemDevice_ConfigVal($hash, $gad->{item}, 'converter'))
+		{
+			my $param;
+			$param->{cmd} = 'log';
+			$param->{gad} = $gad->{item};
+			$param->{device} = fronthemDevice_ConfigVal($hash, $gad->{item}, 'device');
+			$param->{reading} = fronthemDevice_ConfigVal($hash, $gad->{item}, 'reading');
+			my ($converter, $p) = split(/\s+/, fronthemDevice_ConfigVal($hash, $gad->{item}, 'converter'), 2);
+			@{$param->{args}} = split(/\s*,\s*/, $p || '');		
+			fronthemDevice_DoConverter($hash, $converter, $param);
+		}
+	}
+  }
+  if ($msg->{message}->{cmd} eq 'plot')
+  {	
+	$hash->{helper}->{plot} = $msg->{message}->{items};
+    foreach my $gad (@{$hash->{helper}->{plot}})
+    {		
+		if (fronthemDevice_ConfigVal($hash, $gad->{item}, 'converter'))
+		{
+			my $param;
+			$param->{cmd} = 'plot';
+			$param->{gad} = $gad->{item};
+			$param->{device} = fronthemDevice_ConfigVal($hash, $gad->{item}, 'device');
+			$param->{reading} = fronthemDevice_ConfigVal($hash, $gad->{item}, 'reading');
+			$param->{mode} = $gad->{mode};
+			$param->{start} = $gad->{start};
+			$param->{end} = $gad->{end};
+			$param->{count} = $gad->{count};
+			$param->{interval} = $gad->{interval};
+			$param->{updatemode} = $gad->{updatemode};	
+			my ($converter, $p) = split(/\s+/, fronthemDevice_ConfigVal($hash, $gad->{item}, 'converter'), 2);
+			@{$param->{args}} = split(/\s/, $p);			
+			fronthemDevice_DoConverter($hash, $converter, $param);
+		}
+	}
+  }
   return undef;
 }
 
@@ -697,3 +899,45 @@ fronthemDevice_toDriver(@)
 
 
 1;
+
+
+=pod
+=item device
+=item summary The fronthem Device-Connector
+=item summary_DE fronthem Device-Connector
+=begin html
+
+	<p>
+		<a name="fronthemDevice" id="fronthemDevice"></a>
+	</p>
+	<h3>
+		fronthemDevice
+	</h3>
+	<ul>
+		<a name="fronthemDevicedefine" id="fronthemDevicedefine"></a> <b>Define</b>
+		<ul>
+			<code>define &lt;name&gt; fronthemDevice &lt;ip-address&gt;</code><br>
+		</ul><br>
+	</ul>
+	
+=end html
+
+=begin html_DE
+
+	<p>
+		<a name="fronthemDevice" id="fronthemDevice"></a>
+	</p>
+	<h3>
+		fronthemDevice
+	</h3>
+	<ul>
+		<a name="fronthemdefine" id="fronthemdefine"></a> <b>Define</b>
+		<ul>
+			<code>define &lt;name&gt; fronthemDevice &lt;ip-address&gt;</code><br>
+		</ul><br>
+	</ul>
+	
+=end html_DE
+
+=cut
+
