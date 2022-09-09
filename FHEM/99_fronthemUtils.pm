@@ -128,59 +128,63 @@ fronthem_Duration($)    # hourstats daystats weekstats monthstats yearstats
 	return "timerange";
 }
 
+sub fronthem_sunrise($) {
+  my ($hour,$min,$sec) = split(/:/, sunrise_abs($_[0]));
+  return $hour . ':' . $min;
+} 
+
+sub fronthem_sunset($) {
+  my ($hour,$min,$sec) = split(/:/, sunset_abs($_[0]));
+  return $hour . ':' . $min;
+} 
+
 ###############################################################################
 #
 # Umsetzen der UZSU-Settings für ein device
 #
 ###############################################################################
 #
-# Nicht vergessen! In FHEM notify definieren!
+# Damit die Einstellungen gespeichert werden können, folgendes Attribut setzen:
 #
-#    define UZSU notify .*:uzsu:.* { UZSU_execute($NAME, $EVTPART1) }
-#
-# oder wenn Einstellungen gespeichert werden sollen:
-#
-#    define UZSU notify .*:uzsu:.* { UZSU_execute($NAME, $EVTPART1, 'save') }
-#
-# und folgendes Attribut setzen:
-#
-#    attr global autosave 1
+# attr global autosave 1
 #
 sub UZSU_execute($$;$)
 {
-	my ($device, $uzsu, $save) = @_;
-	$uzsu = decode_json($uzsu);
+  my ($device, $uzsu, $save) = @_;
+  $save = (defined($save) ? $save : "na");
+  my $rg = AttrVal('rg_uzsu_'.$device, "room", "na");   
+  fhem('delete wdt_uzsu_'.$device.'.*') if($rg ne "na");
+  fhem('delete rg_uzsu_'.$device) if($rg ne "na");
 	
-	fhem('delete wdt_uzsu_'.$device.'.*');
-	
-	for (my $i = 0; $i < @{$uzsu->{list}}; $i++) {
-		if ($uzsu->{list}[$i]->{active}) {
-			my %rrule = UZSU_getRrules($uzsu->{list}[$i]{rrule});
-			my $holiday = $uzsu->{list}[$i]{holiday}{weekend} && $uzsu->{list}[$i]{holiday}{workday} ? '' : $uzsu->{list}[$i]{holiday}{weekend} ? $rrule{'BYDAY'} ne '' ? ',$we' : '$we' : $uzsu->{list}[$i]{holiday}{workday} ? $rrule{'BYDAY'} ne '' ? ',!$we' : '!$we' : '';		
-			my $time = $uzsu->{list}[$i]{event} eq "time" ?  $uzsu->{list}[$i]{time} : '{'.$uzsu->{list}[$i]->{event} .'_abs("REAL",' . $uzsu->{list}[$i]->{timeOffset} * 60 . ',' . ($uzsu->{list}[$i]->{timeMin} ne '' ? '"' . $uzsu->{list}[$i]->{timeMin} . '"' : '') . ',' . ($uzsu->{list}[$i]->{timeMax} ne '' ? '"' . $uzsu->{list}[$i]->{timeMax} . '"' : '') . ')}';	
-			my $condition = UZSU_getCommand($uzsu->{list}[$i]{condition});
+  for (my $i = 0; $i < @{$uzsu->{list}}; $i++) {
+    if ($uzsu->{list}[$i]->{active}) {
+      my %rrule = UZSU_getRrules($uzsu->{list}[$i]{rrule});
+      my $holiday = $uzsu->{list}[$i]{holiday}{weekend} && $uzsu->{list}[$i]{holiday}{workday} ? '' : $uzsu->{list}[$i]{holiday}{weekend} ? $rrule{'BYDAY'} ne '' ? ',$we' : '$we' : $uzsu->{list}[$i]{holiday}{workday} ? $rrule{'BYDAY'} ne '' ? ',!$we' : '!$we' : '';
 			
-			my $weekdayTimer = $rrule{'BYDAY'} . $holiday . ($rrule{'BYDAY'} ne '' || $holiday ne '' ? "|" : '') . $time . "|" . $uzsu->{list}[$i]{value};	
-			my $delayedExec = UZSU_getCommand($uzsu->{list}[$i]{delayedExec});
+      my $time = $uzsu->{list}[$i]{event} eq "time" ?  $uzsu->{list}[$i]{time} : '{'.$uzsu->{list}[$i]->{event} . '_abs("REAL"' . ($uzsu->{list}[$i]->{timeOffset} ne '' ? ',' . $uzsu->{list}[$i]->{timeOffset} * 60 : '') . ($uzsu->{list}[$i]->{timeMin} ne '' ? ', "' . $uzsu->{list}[$i]->{timeMin} . '"' : '') . ($uzsu->{list}[$i]->{timeMax} ne '' ? ', "' . $uzsu->{list}[$i]->{timeMax} . '"' : '') . ')}';
+      my $condition = UZSU_getCommand($uzsu->{list}[$i]{condition});
+			
+      my $weekdayTimer = $rrule{'BYDAY'} . $holiday . ($rrule{'BYDAY'} ne '' || $holiday ne '' ? "|" : '') . $time . "|" . $uzsu->{list}[$i]{value};	
+      my $delayedExec = UZSU_getCommand($uzsu->{list}[$i]{delayedExec});
 						
-			fhem('defmod wdt_uzsu_' . $device . '_' . $i . ' WeekdayTimer ' . $device . ' en ' . $weekdayTimer . $condition);
-			fhem('attr wdt_uzsu_' . $device . '_' . $i . ' room UZSU');
-			fhem('attr wdt_uzsu_' . $device . '_' . $i . ' group ' . $device);
-			fhem('setreading wdt_uzsu_' . $device . '_' . $i . ' weekdays ' . $weekdayTimer);
-			fhem('defmod rg_uzsu_' . $device . ' readingsgroup wdt_uzsu_' . $device . '.*');
-			fhem('attr rg_uzsu_' . $device . ' room UZSU');
-			if ($delayedExec) {
-				fhem('attr wdt_uzsu_' . $device . '_' . $i . ' delayedExecutionCond ' . $delayedExec);
-			}
-		}
-	}
-	if ($uzsu->{active}) {
-		fhem('attr NAME=wdt_uzsu_' . $device . '_.*' . ' disable 0');
-	}
-	else {
-		fhem('attr NAME=wdt_uzsu_' . $device . '_.*' . ' disable 1');
-	}
-	fhem('save', 1) if ($save eq 'save');	
+      fhem('defmod wdt_uzsu_' . $device . '_' . $i . ' WeekdayTimer ' . $device . ' en ' . $weekdayTimer . $condition);
+      fhem('attr wdt_uzsu_' . $device . '_' . $i . ' room UZSU');
+      fhem('attr wdt_uzsu_' . $device . '_' . $i . ' group ' . $device);
+      fhem('setreading wdt_uzsu_' . $device . '_' . $i . ' weekdays ' . $weekdayTimer);
+      fhem('defmod rg_uzsu_' . $device . ' readingsGroup wdt_uzsu_' . $device . '.*');
+      fhem('attr rg_uzsu_' . $device . ' room UZSU');
+	  if ($delayedExec) {
+        fhem('attr wdt_uzsu_' . $device . '_' . $i . ' delayedExecutionCond ' . $delayedExec);
+      }
+    }
+  }
+  if ($uzsu->{active}) {
+    fhem('attr NAME=wdt_uzsu_' . $device . '_.*' . ' disable 0');
+  }
+  else {
+    fhem('attr NAME=wdt_uzsu_' . $device . '_.*' . ' disable 1');
+  }
+  fhem('save', 1) if ($save eq 'save');	
 }
 
 ###############################################################################
@@ -196,39 +200,49 @@ sub UZSU_getRrules($)
 	foreach (@a){
 		my ($key,$val) = split(/=/, $_);
 		$hash{$key} = $val;
-	}	
-	return %hash;
+	}
+	
+	if (exists($hash{'BYDAY'}))
+	{
+		return %hash;
+	}
+	else {
+		$hash{'BYDAY'} = '';
+		return %hash;
+	}
 }
 
 sub UZSU_getCommand($)
 {
-	my ($command) = @_;	
-	if($command->{active} && $command->{type} ne "String")  
-	{
-		if($command->{deviceString} =~ /^AttrVal|InternalVal|ReadingsVal\("\S+"\s?,\s?"\S+"\s?,\s?"\S*"\)$/)
-		{
-			return ' (' . $command->{deviceString} . ' ' . $command->{type} . ' "' . $command->{value} . '")';
-		}
-		elsif($command->{deviceString} =~ /^Value\("\S+"\)$/)
-		{
-			return ' (' . $command->{deviceString} . ' ' . $command->{type} . ' "' . $command->{value} . '")';
-		}
-	}
-	elsif($command->{active} && $command->{type} eq "String" && $command->{deviceString} ne '')
-	{
-		if($command->{deviceString} =~ /^fhem ".+"( if\(.+\))?$/)
-		{
-			return ' {' . $command->{deviceString} . '}';
-		}
-		else
-		{
-			return ' (' . $command->{deviceString} . ')';
-		}
-	}
-	else
-	{
-		return '';
-	}
+  my ($command) = @_;
+  
+  if($command->{active} && $command->{type} ne "String")
+  {
+    if($command->{deviceString} =~ /^AttrVal|InternalVal|ReadingsVal\("\S+"\s?,\s?"\S+"\s?,\s?"\S*"\)$/)
+    {
+      return ' (' . $command->{deviceString} . ' ' . $command->{type} . ' "' . $command->{value} . '")';
+    }
+    elsif($command->{deviceString} =~ /^Value\("\S+"\)$/)
+    {
+      return ' (' . $command->{deviceString} . ' ' . $command->{type} . ' "' . $command->{value} . '")';
+    }
+  }
+  elsif($command->{active} && $command->{type} eq "String" && $command->{deviceString} ne '')
+  {
+    if($command->{deviceString} =~ /^fhem ".+"( if\(.+\))?$/)
+    {
+      return ' {' . $command->{deviceString} . '}';
+    }
+    elsif($command->{deviceString} =~ /(setstate|setreading|set).([a-zA-Z]+)$/)
+    {
+      return ' ' . $1 . ' $NAME ' . $2 . ' $EVENT';
+    }
+    else
+    {
+      return ' (' . $command->{deviceString} . ')';
+    }
+  }
+  return '';
 }
 
 
@@ -408,6 +422,12 @@ sub UZSU(@)
   
   my @args = @{$param->{args}};
   my $cache = $param->{cache};
+  my $save = '';
+  
+  if (@args == 1 && $args[0] eq 'save')
+  {
+    $save = 'save';
+  }
 
   if ($param->{cmd} eq 'get')
   {
@@ -416,12 +436,16 @@ sub UZSU(@)
   if ($param->{cmd} eq 'send')
   {
     $param->{gad} = $gad;
-	$param->{gadval} = main::fronthem_decodejson(main::ReadingsVal($device, $reading, '{}'));
-	$param->{gads} = [];
+	$param->{gadval} = main::fronthem_decodejson(main::ReadingsVal($device, $reading, '{"active": false, "list": []}'));
+    $param->{gads} = [];
+    $param->{gadval}->{sunrise} = main::fronthem_sunrise("REAL");
+    $param->{gadval}->{sunset} = main::fronthem_sunset("REAL");
+	
     return undef;
   }
   elsif ($param->{cmd} eq 'rcv')
   {
+    main::UZSU_execute($device, $gadval, $save);
 	$gadval = main::fronthem_encodejson($gadval);
 	$gadval =~ s/;/;;/ig;
 	$param->{result} = main::fhem("setreading $device $reading $gadval");
@@ -656,9 +680,9 @@ sub Plot(@)
 			}
 				
 			my $string = main::CommandGet(undef, $args[0] . ' - webchart ' . $from . ' ' . $to . ' ' . $device . ' ' . $duration . ' TIMESTAMP ' . $reading);
-			my @resonse = main::fronthem_decodejson($string);
+			my @response = main::fronthem_decodejson($string);
 
-			foreach my $data (@resonse) {
+			foreach my $data (@response) {
 				my $i = 0;
 				foreach my $row (@{$data->{data}}) {
 					if ($mode eq "raw") { # [TIMESTAMP,VALUE]
@@ -767,11 +791,11 @@ sub Plotfile(@)
 			$to =~ s/ /_/ig;
 			
 			my $string = main::fhem("get "  . $args[0] . " - - " . $from . " " . $to ." " . $column .":" . $reading . ":0:" . $regex, 1);
-			my @resonse = split("\n", $string);
-			pop @resonse;
+			my @response = split("\n", $string);
+			pop @response;
 			
-			for (my $i = 0; $i < @resonse; $i++) {			
-				$resonse[$i] =~ /([0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2})\s+([0-9\.-]+)/;				
+			for (my $i = 0; $i < @response; $i++) {			
+				$response[$i] =~ /([0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2})\s+([0-9\.-]+)/;				
 				push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($1));
 				push(@{$data[0]->{plotdata}[$i]}, sprintf("%#.4f", $2) * 1);
 			}

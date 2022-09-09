@@ -1,3 +1,7 @@
+2022-09-09
+- new functions for uzsu: thx raman
+- changeable websocket port and buffer size: thx raman
+
 2022-09-08
 - Adaptions to smartVISU v2.9+ from 2018: thx raman
 

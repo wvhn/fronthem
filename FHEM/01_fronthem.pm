@@ -30,6 +30,7 @@ use IO::Select;
 use fhwebsocket;
 use JSON;
 use utf8;
+use Encode;
 
 use Data::Dumper;
 
@@ -44,10 +45,11 @@ fronthem_Initialize(@)
   $hash->{DefFn}      = "fronthem_Define";
   $hash->{SetFn}      = "fronthem_Set";
   $hash->{ReadFn}     = "fronthem_Read";
+  $hash->{AttrFn}     = "fronthem_Attr";
   $hash->{UndefFn}    = "fronthem_Undef";
   $hash->{NotifyFn}   = "fronthem_Notify";
   $hash->{ShutdownFn} = "fronthem_Shutdown";
-  $hash->{AttrList}   = "configFile ".$readingFnAttributes;
+  $hash->{AttrList}   = "configFile maxSendSize port ".$readingFnAttributes;
 }
 
 sub
@@ -56,47 +58,28 @@ fronthem_Define($$)
   my ($hash, $def) = @_;
   my @a = split("[ \t][ \t]*", $def);
   my $name = $a[0];
-  my $cfg;
 
   $hash->{helper}->{COMMANDSET} = 'save';
-
-  #TODO move it to "initialized"
-  fronthem_ReadCfg($hash, 'fronthem.cfg');
   
-  my $port = 16384;
+  $hash->{helper}->{ipcPort} = 16384;
   # create and register server ipc parent (listener == socket)
   do
   {
     $hash->{helper}->{listener} = IO::Socket::INET->new(
       LocalHost => 'localhost',
-      LocalPort => $port, 
+      LocalPort => $hash->{helper}->{ipcPort}, 
       Listen => SOMAXCONN, 
       Reuse => 1 );
-    $port++;
+    $hash->{helper}->{ipcPort} += 1;
   } until (defined($hash->{helper}->{listener}));
-  $port -= 1;
+  $hash->{helper}->{ipcPort} -= 1;
   my $flags = fcntl($hash->{helper}->{listener}, F_GETFL, 0) or return "error shaping ipc: $!";
   fcntl($hash->{helper}->{listener}, F_SETFL, $flags | O_NONBLOCK) or return "error shaping ipc: $!";
-  Log3 ($hash, 2, "$hash->{NAME}: ipc listener opened at port $port");
+  Log3 ($hash, 2, "$hash->{NAME}: ipc listener opened at port $hash->{helper}->{ipcPort}");
   $hash->{TCPDev} = $hash->{helper}->{listener};
   $hash->{FD} = $hash->{helper}->{listener}->fileno();
   $selectlist{"$name:ipcListener"} = $hash;
-
-  $hash->{helper}->{main}->{state} = 'run';
-  if ($init_done)
-  {
-    # TODO set initial readings
-  }
-
-  # prepare forking the ws server
-  $cfg->{hash} = $hash;
-  $cfg->{id} = 'ws';
-  $cfg->{port} = 2121;
-  $cfg->{ipcPort} = $port;
-  # preserve 
-  $hash->{helper}->{main}->{state} = 'run';
-  fronthem_StartWebsocketServer($cfg);
-
+  
   return undef;
 }
 
@@ -158,7 +141,19 @@ fronthem_Notify($$)
       #Log3 ($hash, 1, "in $e[0]"); #TODO remove
       if ($e[0] eq 'INITIALIZED')
       {
-        #
+		fronthem_ReadCfg($hash, 'fronthem.cfg');
+        $hash->{MAXSENDSIZE} = AttrVal( $name, "maxSendSize", "65536" );
+        $hash->{PORT} = AttrVal( $name, "port", "2121" );
+		# prepare forking the ws server
+		my $cfg;
+        $cfg->{hash} = $hash;
+        $cfg->{id} = 'ws';
+        $cfg->{port} = $hash->{PORT};
+        $cfg->{ipcPort} = $hash->{helper}->{ipcPort};
+        $cfg->{max_send_size} = $hash->{MAXSENDSIZE};
+        # preserve 
+        $hash->{helper}->{main}->{state} = 'run';
+        fronthem_StartWebsocketServer($cfg);
       }
       elsif ($e[0] eq 'RENAMED')
       {
@@ -186,6 +181,30 @@ fronthem_Notify($$)
   }
   readingsEndUpdate($hash, 1);
   return undef;
+}
+
+sub
+fronthem_Attr(@)
+{
+  my ($type, $devName, $attrName, @param) = @_;
+  my $hash = $defs{$devName};
+  Log3 $devName, 1, "01_fronthem: $type - $devName - $attrName - $param[0]";
+  
+  if($type eq "set" && $attrName eq "maxSendSize" && $param[0]) {
+	$hash->{MAXSENDSIZE} = $param[0];
+  }
+  
+  if($type eq "set" && $attrName eq "port" && $param[0]) {
+	$hash->{MAXSENDSIZE} = $param[0];
+  }
+  
+  if($type eq "del" && $attrName eq "maxSendSize") {
+	$hash->{MAXSENDSIZE} = 65536;
+  }
+  
+  if($type eq "del" && $attrName eq "port") {
+	$hash->{MAXSENDSIZE} = 2121;
+  }
 }
 
 sub
@@ -247,6 +266,7 @@ fronthem_ipcRead($)
       # TODO check if a dispatcher is set
       eval 
       {
+        $msg = Encode::encode('UTF-8', $msg);
         $up = decode_json($msg);
     
         Log3 ($ipcHash->{PARENT}, $up->{log}->{level}, "ipc $ipcHash->{NAME} ($id): $up->{log}->{text}") if (exists($up->{log}) && (($up->{log}->{cmd} || '') eq 'log'));
@@ -285,8 +305,9 @@ fronthem_ipcRead($)
 		  }
 		} 
         fronthem_ProcessDeviceMsg($ipcHash, $up) if (exists($up->{message}));
-      };
-      Log3 ($ipcHash->{PARENT}, 2, "ipc $ipcHash->{NAME} ($id): error $@ decoding ipc msg $msg") if ($@);
+      } or do {
+        Log3 ($ipcHash->{PARENT}, 2, "ipc $ipcHash->{NAME} ($id): error $@ decoding ipc msg $msg") if ($@);  
+	  };
     }
     else
     {
@@ -673,6 +694,7 @@ fronthem_StartWebsocketServer(@)
 {
   my ($cfg) = @_;  
   my $id = $cfg->{id};
+  my $name = $cfg->{hash}->{NAME};
 
   my $pid = fork();
   return "Error while try to fork $id: $!" unless (defined $pid);
@@ -718,6 +740,7 @@ fronthem_StartWebsocketServer(@)
   $ws->{'ipc'} = $ipc;
   $ws->{id} = $id;
   $ws->{buffer} = '';
+  $ws->{max_send_size} = $cfg->{max_send_size};
   $ws->watch_readable($ipc->fileno() => \&fronthem_wsIpcRead);
 
   fronthem_forkLog3 ($ws->{ipc}, 1, "$ws->{id} could not open port $cfg->{port}") unless $ws->start;
@@ -815,9 +838,12 @@ fronthem_wsIpcRead(@)
   while (($serv->{buffer} =~ m/\n/) && (($msg, $serv->{buffer}) = split /\n/, $serv->{buffer}, 2))
   {
     eval {
+      $msg = Encode::encode('UTF-8', $msg);
       $msg = decode_json($msg);
-    };
-    fronthem_forkLog3 ($serv->{ipc}, 1, "$serv->{id} ipc decoding error $@") if ($@);
+    } or do {
+      fronthem_forkLog3 ($serv->{ipc}, 1, "$serv->{id} ipc decoding error $@") if ($@);
+	  $msg = {};
+	};
     fronthem_wsProcessInboundCmd($serv, $msg);
   }
   return undef;

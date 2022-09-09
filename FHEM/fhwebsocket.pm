@@ -63,7 +63,7 @@ sub start {
       if ($fh == $self->{listen}) {
         my $sock = $self->{listen}->accept;
         next unless $sock;
-        my $conn = new fronthem::WebSocket::Server::Connection(socket => $sock, server => $self);
+        my $conn = new fronthem::WebSocket::Server::Connection(socket => $sock, server => $self, max_send_size => $self->{max_send_size});
         $self->{conns}{$sock} = {conn=>$conn, lastrecv=>time};
         $self->{select_readable}->add($sock);
         $self->{on_connect}($self, $conn);
