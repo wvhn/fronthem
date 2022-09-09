@@ -1,6 +1,6 @@
 ##############################################
 # $Id: 01_fronthem.pm 21 2015-02-13 20:25:09Z. herrmannj $
-
+# modified: 2018-04-03 00:00:00Z raman
 #TODO alot ;)
 #organize loading order
 #attr cfg file
@@ -33,6 +33,8 @@ use utf8;
 
 use Data::Dumper;
 
+sub fronthem_Notify($$);
+
 sub
 fronthem_Initialize(@)
 {
@@ -43,6 +45,7 @@ fronthem_Initialize(@)
   $hash->{SetFn}      = "fronthem_Set";
   $hash->{ReadFn}     = "fronthem_Read";
   $hash->{UndefFn}    = "fronthem_Undef";
+  $hash->{NotifyFn}   = "fronthem_Notify";
   $hash->{ShutdownFn} = "fronthem_Shutdown";
   $hash->{AttrList}   = "configFile ".$readingFnAttributes;
 }
@@ -143,6 +146,7 @@ fronthem_Notify($$)
 {
   my ($hash, $ntfyDev) = @_;
   my $ntfyDevName = $ntfyDev->{NAME};
+  my $name = $hash->{NAME};
 
   # responde to fhem system events
   # INITIALIZED|REREADCFG|DEFINED|RENAMED|SHUTDOWN
@@ -151,6 +155,7 @@ fronthem_Notify($$)
     foreach my $event (@{$ntfyDev->{CHANGED}})
     {
       my @e = split(' ', $event);
+      #Log3 ($hash, 1, "in $e[0]"); #TODO remove
       if ($e[0] eq 'INITIALIZED')
       {
         #
@@ -165,6 +170,21 @@ fronthem_Notify($$)
       }
     }
   }
+  elsif ( $ntfyDevName ne $name ) {
+    return undef
+  }
+  
+  foreach my $change (@{$ntfyDev->{CHANGED}}) {
+	readingsBeginUpdate($hash);
+	#Log3 $name, 1, "fronthem $name: change: $change.";
+		
+	if ($change =~ /^(.+): (.+)/) {
+	  if($1 eq "ws") {
+		readingsBulkUpdate($hash, "state", $2);
+	  }
+	}
+  }
+  readingsEndUpdate($hash, 1);
   return undef;
 }
 
@@ -238,11 +258,32 @@ fronthem_ipcRead($)
             $ipcHash->{PARENT}->{helper}->{config}->{$item}->{type} = 'item' unless defined($ipcHash->{PARENT}->{helper}->{config}->{$item}->{type});
           }
         }
-        if (exists($up->{message}) && (($up->{message}->{cmd} || '') eq 'series'))
+		if (exists($up->{message}) && (($up->{message}->{cmd} || '') eq 'plot'))
         {
-          my $item = $up->{message}->{item};
-          $ipcHash->{PARENT}->{helper}->{config}->{$item}->{type} = 'plot';
+		  foreach my $item (@{$up->{message}->{items}})
+		  {
+			  my $gad = $item->{item};
+			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{type} = 'plot';
+			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{mode} = $item->{mode};
+			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{start} = $item->{start};
+			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{end} = $item->{end};
+			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{count} = $item->{count};
+			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{interval} = $item->{interval};
+			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{updatemode} = $item->{updatemode};
+			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{datamode} = $item->{datamode};
+			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{gad} = $item->{item} if (defined($item->{item}));
+			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{gads} = $item->{items} if (defined($item->{items})); 
+		  }
         }
+		if (exists($up->{message}) && (($up->{message}->{cmd} || '') eq 'log'))
+		{
+		  foreach my $item (@{$up->{message}->{items}})
+		  {
+			my $gad = $item->{item};
+			$ipcHash->{PARENT}->{helper}->{config}->{$gad}->{type} = 'log';			 
+			$ipcHash->{PARENT}->{helper}->{config}->{$gad}->{size} = $item->{size};
+		  }
+		} 
         fronthem_ProcessDeviceMsg($ipcHash, $up) if (exists($up->{message}));
       };
       Log3 ($ipcHash->{PARENT}, 2, "ipc $ipcHash->{NAME} ($id): error $@ decoding ipc msg $msg") if ($@);
@@ -386,6 +427,21 @@ fronthem_ReadCfg(@)
       $filtered->{config}->{$key}->{reading} = $data->{config}->{$key}->{reading};
       $filtered->{config}->{$key}->{converter} = $data->{config}->{$key}->{converter};
       $filtered->{config}->{$key}->{set} = $data->{config}->{$key}->{set};
+	  
+	  if ($data->{config}->{$key}->{type} eq 'plot')
+	  {
+		$filtered->{config}->{$key}->{start} = $data->{config}->{$key}->{start};
+		$filtered->{config}->{$key}->{end} = $data->{config}->{$key}->{end};
+		$filtered->{config}->{$key}->{mode} = $data->{config}->{$key}->{mode};
+		$filtered->{config}->{$key}->{interval} = $data->{config}->{$key}->{interval};
+		$filtered->{config}->{$key}->{updatemode} = $data->{config}->{$key}->{updatemode};
+		$filtered->{config}->{$key}->{datamode} = $data->{config}->{$key}->{datamode};
+	  }
+	  
+	  if ($data->{config}->{$key}->{type} eq 'log')
+	  {
+		$filtered->{config}->{$key}->{size} = $data->{config}->{$key}->{size};
+	  }	  	  
     }
   }
 
@@ -414,6 +470,30 @@ fronthem_WriteCfg(@)
       $cfgContent->{config}->{$key}->{converter} = $hash->{helper}->{config}->{$key}->{converter};
       $cfgContent->{config}->{$key}->{set} = $hash->{helper}->{config}->{$key}->{set};
     }
+	elsif ($hash->{helper}->{config}->{$key}->{type} eq 'log')
+    {
+      $cfgContent->{config}->{$key}->{type} = $hash->{helper}->{config}->{$key}->{type};
+	  $cfgContent->{config}->{$key}->{size} = $hash->{helper}->{config}->{$key}->{size};
+      $cfgContent->{config}->{$key}->{device} = $hash->{helper}->{config}->{$key}->{device};
+      $cfgContent->{config}->{$key}->{reading} = $hash->{helper}->{config}->{$key}->{reading};
+      $cfgContent->{config}->{$key}->{converter} = $hash->{helper}->{config}->{$key}->{converter};
+      $cfgContent->{config}->{$key}->{set} = $hash->{helper}->{config}->{$key}->{set};
+    }
+	elsif ($hash->{helper}->{config}->{$key}->{type} eq 'plot')
+    {
+      $cfgContent->{config}->{$key}->{type} = $hash->{helper}->{config}->{$key}->{type};
+      $cfgContent->{config}->{$key}->{device} = $hash->{helper}->{config}->{$key}->{device};
+      $cfgContent->{config}->{$key}->{reading} = $hash->{helper}->{config}->{$key}->{reading};
+      $cfgContent->{config}->{$key}->{converter} = $hash->{helper}->{config}->{$key}->{converter};
+      $cfgContent->{config}->{$key}->{set} = $hash->{helper}->{config}->{$key}->{set};
+	  
+	  $cfgContent->{config}->{$key}->{start} = $hash->{helper}->{config}->{$key}->{start};
+	  $cfgContent->{config}->{$key}->{end} = $hash->{helper}->{config}->{$key}->{end};
+	  $cfgContent->{config}->{$key}->{mode} = $hash->{helper}->{config}->{$key}->{mode};
+	  $cfgContent->{config}->{$key}->{interval} = $hash->{helper}->{config}->{$key}->{interval};
+	  $cfgContent->{config}->{$key}->{updatemode} = $hash->{helper}->{config}->{$key}->{updatemode};
+	  $cfgContent->{config}->{$key}->{datamode} = $hash->{helper}->{config}->{$key}->{datamode};
+    }
   }
 
   mkdir('./www/fronthem',0777) unless (-d './www/fronthem');
@@ -436,13 +516,19 @@ fronthem_CreateListen(@)
 {
   my ($hash) = @_;
   my $listen;
+  my $plotlisten;
+  my $loglisten;
 
   foreach my $key (keys %{$hash->{helper}->{config}})
   {
     my $gad = $hash->{helper}->{config}->{$key};
     $listen->{$gad->{device}}->{$gad->{reading}}->{$key} = $hash->{helper}->{config}->{$key} if ((defined($gad->{device})) && (defined($gad->{reading})));
+	$plotlisten->{$gad->{device}}->{$gad->{reading}}->{$key} = $hash->{helper}->{config}->{$key} if ((defined($gad->{device})) && (defined($gad->{reading})) && $gad->{type} eq 'plot');
+	$loglisten->{$gad->{device}}->{$gad->{reading}}->{$key} = $hash->{helper}->{config}->{$key} if ((defined($gad->{device})) && (defined($gad->{reading})) && $gad->{type} eq 'log');
   }
   $hash->{helper}->{listen} = $listen;
+  $hash->{helper}->{plot} = $plotlisten;
+  $hash->{helper}->{log} = $loglisten;
   return undef;
 }
 
@@ -566,7 +652,7 @@ fronthem_FromDevice(@)
   my ($hash, $device, $msg) = @_;
   unless (exists($hash->{helper}->{sender}->{$device}))
   {
-    Log3 ($hash, 1, "$hash->{NAME} $device want send but isnt a sender");
+    Log3 ($hash, 4, "$hash->{NAME} $device want send but isnt a sender");
     # TODO device must be disconnected !!    fronthem_DisconnectClient($hash, $device);
     return undef;
   }
@@ -754,3 +840,44 @@ fronthem_wsProcessInboundCmd(@)
 }
 
 1;
+
+=pod
+=item device
+=item summary fronthem websocket for FHEM
+=item summary_DE fronthem websocket Schnittstelle f&uuml;r FHEM
+=begin html
+
+	<p>
+		<a name="fronthem" id="fronthem"></a>
+	</p>
+	<h3>
+		fronthem
+	</h3>
+	<ul>
+		<a name="fronthemdefine" id="fronthemdefine"></a> <b>Define</b>
+		<ul>
+			<code>define &lt;name&gt; fronthem</code><br>
+		</ul><br>
+	</ul>
+	
+=end html
+
+=begin html_DE
+
+	<p>
+		<a name="fronthem" id="fronthem"></a>
+	</p>
+	<h3>
+		fronthem
+	</h3>
+	<ul>
+		<a name="fronthemdefine" id="fronthemdefine"></a> <b>Define</b>
+		<ul>
+			<code>define &lt;name&gt; fronthem</code><br>
+		</ul><br>
+	</ul>
+	
+=end html_DE
+
+=cut
+
