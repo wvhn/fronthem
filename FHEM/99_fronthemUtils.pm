@@ -817,11 +817,71 @@ sub Plotfile(@)
 1;
 
 =pod
+=item helper
+=item summary fronthem utility functions
+=item summary_DE fronthem Hilfsfunktionen
 =begin html
 
-<a name="fronthemUtils"></a>
-<h3>fronthemUtils</h3>
-<ul>
-</ul>
+  <p>
+    <a name="fronthemUtils" id="fronthemUtils"></a>
+  </p>
+  <h3>
+    fronthemUtils
+  </h3>
+  <ul>
+    This is a collection of converter functions that can be used with
+    fronthemDevice<br/>
+    </br>
+    </br>
+    <b>Defined converter functions</b><br/><br/>
+	<ul>
+	  <li><b>AnAus</b><br>invert state values an|aus to 0|1</li><br/>
+	  <li><b>Log</b><br>send readings collected in dummy device as status.log</li><br/>
+	  <li><b>NumInvert</b><br>direct invert of numerical values</li><br/>
+	  <li><b>Plot</b><br>Plot data from fhem database<br>
+	  parameter for converter: Plot &lt;name of database&gt;
+	  </li><br/>
+	  <li><b>Plotfile</b><br>Plot data from fhem filelog<br>
+	  parameter for converter: Plotfile &lt;column&gt; &lt;regex&gt;
+	  </li><br/>
+	  <li><b>UZSU</b><br>for use with UZSU-Widget in smartVisu<br>
+	  parameter for converter: UZSU &lt;save&gt; (optional: save - set it to save data for WeekdayTimer, <b>attr global autosave</b> must be set to 1 )
+	  </li><br/>
+	</ul>
+  </ul>
+  
 =end html
+
+=begin html_DE
+
+  <p>
+    <a name="fronthemUtils" id="fronthemUtils"></a>
+  </p>
+  <h3>
+    fronthemUtils
+  </h3>
+  <ul>
+    Sammlung an Converter-Functionen, die mit
+    fronthemDevice eingesetzt werden k&ouml;nnen<br/>
+    </br>
+    </br>
+    <b>Converter-Functionen</b><br/><br/>
+	<ul>
+	  <li><b>AnAus</b><br>wandelt die Werte an|aus in 0|1 um und umgekehrt</li><br/>
+	  <li><b>Log</b><br>Sendet Readings, die in einem Dummy-Device gesammelt werden als status.log</li><br/>
+	  <li><b>NumInvert</b><br>wandelt numerische Werte direkt um</li><br/>
+	  <li><b>Plot</b><br>Plot-Daten aus der FHEM-Datenbank<br>
+	  Parameter f&uuml;r converter: Plot &lt;name of database&gt;
+	  </li><br/>
+	  <li><b>Plotfile</b><br>Plot-Daten aus filelog von FHEM<br>
+	  Parameter f&uuml;r converter: Plotfile &lt;column&gt; &lt;regex&gt;
+	  </li><br/>
+	  <li><b>UZSU</b><br>for use with UZSU-Widget in smartVisu<br>
+	  Parameter f&uuml;r converter: UZSU &lt;save&gt; (optional: save - Parameter angeben, wenn die Daten f&uuml;r WeekdayTimer gespeichert werden sollen,
+	  <b>attr global autosave</b> muss daf&uuml;r auf den Wert 1 gesetzt werden)
+	  </li><br/>
+	</ul>
+  </ul>
+  
+=end html_DE
 =cut

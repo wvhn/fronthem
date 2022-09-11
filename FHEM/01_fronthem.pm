@@ -188,14 +188,14 @@ fronthem_Attr(@)
 {
   my ($type, $devName, $attrName, @param) = @_;
   my $hash = $defs{$devName};
-  Log3 $devName, 1, "01_fronthem: $type - $devName - $attrName - $param[0]";
+  #Log3 $devName, 1, "01_fronthem: $type - $devName - $attrName - $param[0]";
   
   if($type eq "set" && $attrName eq "maxSendSize" && $param[0]) {
 	$hash->{MAXSENDSIZE} = $param[0];
   }
   
   if($type eq "set" && $attrName eq "port" && $param[0]) {
-	$hash->{MAXSENDSIZE} = $param[0];
+	$hash->{PORT} = $param[0];
   }
   
   if($type eq "del" && $attrName eq "maxSendSize") {
@@ -203,7 +203,7 @@ fronthem_Attr(@)
   }
   
   if($type eq "del" && $attrName eq "port") {
-	$hash->{MAXSENDSIZE} = 2121;
+	$hash->{PORT} = 2121;
   }
 }
 
@@ -884,6 +884,19 @@ fronthem_wsProcessInboundCmd(@)
 		<ul>
 			<code>define &lt;name&gt; fronthem</code><br>
 		</ul><br>
+	</ul><br>
+	<br>
+	<a name="fronthemget" id="fronthemget"></a> <b>Attributes</b>
+	<ul>
+		Attributes (restart of FHEM necessary in case of changes):
+		<ul>
+			<li>
+				<b>maxSendSize</b> &nbsp;&nbsp;-&nbsp;&nbsp; default: 65536, 0 to disable payload size check
+			</li>
+			<li>
+				<b>port</b> &nbsp;&nbsp;-&nbsp;&nbsp; default: 2121
+			</li>
+		</ul>
 	</ul>
 	
 =end html
@@ -901,9 +914,21 @@ fronthem_wsProcessInboundCmd(@)
 		<ul>
 			<code>define &lt;name&gt; fronthem</code><br>
 		</ul><br>
+	</ul><br>
+	<br>
+	<a name="fronthemget" id="fronthemget"></a> <b>Attribute</b>
+	<ul>
+		Attribute (bei &Auml;nderungen Neustart von FHEM n&ouml;tig):
+		<ul>
+			<li>
+				<b>maxSendSize</b> &nbsp;&nbsp;-&nbsp;&nbsp; Standard: 65536, Wert 0 deaktiviert payload size check
+			</li>
+			<li>
+				<b>port</b> &nbsp;&nbsp;-&nbsp;&nbsp; Standard: 2121
+			</li>
+		</ul>
 	</ul>
 	
 =end html_DE
 
 =cut
-
