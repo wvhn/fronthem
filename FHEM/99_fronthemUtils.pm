@@ -39,11 +39,13 @@ fronthem_TimeStamp($)
   return $time * 1000;
 }
 
+# evaluates smartVISU duration format with up to 4 digits (instead of 2)
+# TO DO: loop through the parameter with more terms e.g. "1y 3m 5d 10h" and sum the results up
 sub
 fronthem_Time($$)
 {
 	my ($time, $period) = @_;
-	if ($period =~ /^(\d{1,2})(s|i|h|d|w|m|y)/)
+	if ($period =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
 	{
 		my $newTime = 0;
 		if ($2 eq "s")
@@ -79,11 +81,13 @@ fronthem_Time($$)
 	return $time;
 }
 
+# select the database evaluation mode from smartVISU duration (4 digits instead of 2)
+# TO DO: select the mode from a parameter with more terms according to the calculation in fronthem_Time
 sub
 fronthem_Duration($)    # hourstats daystats weekstats monthstats yearstats
 {
 	my ($duration) = @_;
-	if ($duration =~ /^(\d{1,2})(s|i|h|d|w|m|y)/)
+	if ($duration =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
 	{
 		if ($2 eq "s" || $2 eq "i")
 		{
