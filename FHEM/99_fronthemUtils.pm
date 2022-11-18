@@ -41,95 +41,121 @@ fronthem_TimeStamp($)
 
 # evaluates smartVISU duration format with up to 4 digits (instead of 2)
 # TO DO: loop through the parameter with more terms e.g. "1y 3m 5d 10h" and sum the results up
+# DONE: used split() command and foreach loop around the "if ($period ... " statement
 sub
 fronthem_Time($$)
 {
 	my ($time, $period) = @_;
-	if ($period =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
+	my @periods = split(' ', $period);  # split parameters like "1y 3m 5d 10h" into an array like ("1y","3m","5d","10h")
+	foreach my $period (@periods) 	    # loop over the individual array elements
 	{
-		my $newTime = 0;
-		if ($2 eq "s")
+		if ($period =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
 		{
-			$newTime = $1;
+			my $newTime = 0;
+			if ($2 eq "s")
+			{
+				$newTime = $1;
+			}
+			elsif ($2 eq "i")
+			{
+				$newTime = $1 * 60;
+			}
+			elsif ($2 eq "h")
+			{
+				$newTime = $1 * 3600;
+			}
+			elsif ($2 eq "d")
+			{
+				$newTime = $1 * 3600 * 24;
+			}
+			elsif ($2 eq "w")
+			{
+				$newTime = $1 * 3600 * 24 * 7;
+			}
+			elsif ($2 eq "m")
+			{
+				$newTime = $1 * 3600 * 24 * 30;
+			}
+			elsif ($2 eq "y")
+			{
+				$newTime = $1 * 3600 * 24 * 365;
+			}
+			$time = $time - $newTime;
 		}
-		elsif ($2 eq "i")
-		{
-			$newTime = $1 * 60;
-		}
-		elsif ($2 eq "h")
-		{
-			$newTime = $1 * 3600;
-		}
-		elsif ($2 eq "d")
-		{
-			$newTime = $1 * 3600 * 24;
-		}
-		elsif ($2 eq "w")
-		{
-			$newTime = $1 * 3600 * 24 * 7;
-		}
-		elsif ($2 eq "m")
-		{
-			$newTime = $1 * 3600 * 24 * 30;
-		}
-		elsif ($2 eq "y")
-		{
-			$newTime = $1 * 3600 * 24 * 365;
-		}
-		$time = $time - $newTime;
 	}
 	return $time;
 }
 
-# select the database evaluation mode from smartVISU duration (4 digits instead of 2)
-# TO DO: select the mode from a parameter with more terms according to the calculation in fronthem_Time
+# select the database evaluation mode from smartVISU duration tmax - tmin (in seconds)
 sub
-fronthem_Duration($)    # hourstats daystats weekstats monthstats yearstats
+fronthem_Duration($)     # duration of interval (tmax - tmin) in seconds
 {
 	my ($duration) = @_;
-	if ($duration =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
-	{
-		if ($2 eq "s" || $2 eq "i")
+	if ($duration > 2*365*24*3600) 
 		{
-			return "timerange";
+			return 'yearstats';
 		}
-		elsif ($2 eq "h")
+		elsif ($duration > 2*30*24*3600)
 		{
-			if ($1 eq "1") {
-				return "timerange";
-			}
-			return "hourstats";
-		}
-		elsif ($2 eq "d")
+			return 'monthsstats';
+		}		
+		elsif ($duration > 2*7*24*3600)
 		{
-			if ($1 eq "1") {
-				return "hourstats";
-			}
-			return "daystats";
+			return 'weekstats';
 		}
-		elsif ($2 eq "w")
+		elsif ($duration > 2*24*3600)
 		{
-			if ($1 eq "1") {
-				return "daystats";
-			}
-			return "weekstats";
+			return 'daystats';
 		}
-		elsif ($2 eq "m")
+		elsif ($duration > 2*3600)
 		{
-			if ($1 eq "1") {
-				return "weekstats";
-			}
-			return "monthstats";
+			return 'hourstats';
 		}
-		elsif ($2 eq "y")
-		{
-			if ($1 eq "1") {
-				return "monthstats";
-			}
-			return "yearstats";
-		}
-	}	
-	return "timerange";
+	return 'timerange';
+#	my ($duration) = @_;
+#	if ($duration =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
+#	{
+#		if ($2 eq "s" || $2 eq "i")
+#		{
+#			return "timerange";
+#		}
+#		elsif ($2 eq "h")
+#		{
+#			if ($1 eq "1") {
+#				return "timerange";
+#			}
+#			return "hourstats";
+#		}
+#		elsif ($2 eq "d")
+#		{
+#			if ($1 eq "1") {
+#				return "hourstats";
+#			}
+#			return "daystats";
+#		}
+#		elsif ($2 eq "w")
+#		{
+#			if ($1 eq "1") {
+#				return "daystats";
+#			}
+#			return "weekstats";
+#		}
+#		elsif ($2 eq "m")
+#		{
+#			if ($1 eq "1") {
+#				return "weekstats";
+#			}
+#			return "monthstats";
+#		}
+#		elsif ($2 eq "y")
+#		{
+#			if ($1 eq "1") {
+#				return "monthstats";
+#			}
+#			return "yearstats";
+#		}
+#	}	
+#	return "timerange";
 }
 
 sub fronthem_sunrise($) {
@@ -677,11 +703,16 @@ sub Plot(@)
 			$from =~ s/ /_/ig;
 			my $to = main::FmtDateTime(main::fronthem_Time(time(), $end));			
 			$to =~ s/ /_/ig;
-		
+			
 			my $duration = "timerange";
 			if ($mode ne "raw") {
-				$duration = main::fronthem_Duration($start);
+				my $duration_seconds = main::fronthem_Time(0, $end) - main::fronthem_Time(0, $start);
+				$duration = main::fronthem_Duration($duration_seconds);
 			}
+		
+#			if ($mode ne "raw") {
+#				$duration = main::fronthem_Duration($start);
+#			}
 				
 			my $string = main::CommandGet(undef, $args[0] . ' - webchart ' . $from . ' ' . $to . ' ' . $device . ' ' . $duration . ' TIMESTAMP ' . $reading);
 			my @response = main::fronthem_decodejson($string);
