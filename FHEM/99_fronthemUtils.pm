@@ -97,7 +97,7 @@ fronthem_Duration($)     # duration of interval (tmax - tmin) in seconds
 		}
 		elsif ($duration > 2*30*24*3600)
 		{
-			return 'monthsstats';
+			return 'monthstats';
 		}		
 		elsif ($duration > 2*7*24*3600)
 		{
