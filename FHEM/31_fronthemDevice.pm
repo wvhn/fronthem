@@ -629,7 +629,18 @@ fronthemDevice_DoConverter(@)
 	my $msg;
     $msg->{receiver} = $hash->{NAME};
     $msg->{message}->{cmd} = $cmd;
-    @{$msg->{message}->{items}} = @{$param->{gads}}?@{$param->{gads}}:($param->{gad}, $param->{gadval});
+#    @{$msg->{message}->{items}} = @{$param->{gads}}?@{$param->{gads}}:($param->{gad}, $param->{gadval});
+#
+# Workaround because statement above throws errors if parameters are missing
+#
+	eval {
+	  @{$msg->{message}->{items}} = @{$param->{gads}}?@{$param->{gads}}:($param->{gad}, $param->{gadval});
+	} or do {
+	  use Data::Dumper;
+	  print "Unexpected error due to missing gad parameter:";
+	  print Dumper $msg;
+	  return;
+	};
     fronthemDevice_toDriver($hash, $msg);
     return undef;
   }
