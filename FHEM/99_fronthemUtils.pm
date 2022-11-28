@@ -1,6 +1,7 @@
 ##############################################
 # $Id: 99_fronthemUtils.pm 0 2015-11-10 08:00:00Z herrmannj $
 # modified: 2018-04-14 00:00:00Z raman
+# modified: 2022-11-27 11:00:00Z alkazaa and wvhn
 package main;
 
 use strict;
@@ -40,8 +41,7 @@ fronthem_TimeStamp($)
 }
 
 # evaluates smartVISU duration format with up to 4 digits (instead of 2)
-# TO DO: loop through the parameter with more terms e.g. "1y 3m 5d 10h" and sum the results up
-# DONE: used split() command and foreach loop around the "if ($period ... " statement
+# loops through the parameter with more terms e.g. "1y 3m 5d 10h" and sum the results up
 sub
 fronthem_Time($$)
 {
@@ -86,76 +86,54 @@ fronthem_Time($$)
 	return $time;
 }
 
-# select the database evaluation mode from smartVISU duration tmax - tmin (in seconds)
+# select the database evaluation mode from first term of smartVISU duration, e.g. "0d" is daystats but "1d" is hourstats
 sub
-fronthem_Duration($)     # duration of interval (tmax - tmin) in seconds
+fronthem_Duration($)     
 {
 	my ($duration) = @_;
-	if ($duration > 2*365*24*3600) 
+	if ($duration =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
+	{
+		if ($2 eq "s" || $2 eq "i")
 		{
-			return 'yearstats';
+			return "timerange";
 		}
-		elsif ($duration > 2*30*24*3600)
+		elsif ($2 eq "h")
 		{
-			return 'monthstats';
-		}		
-		elsif ($duration > 2*7*24*3600)
-		{
-			return 'weekstats';
+			if ($1 eq "1") {
+				return "timerange";
+			}
+			return "hourstats";
 		}
-		elsif ($duration > 2*24*3600)
+		elsif ($2 eq "d")
 		{
-			return 'daystats';
+			if ($1 eq "1") {
+				return "hourstats";
+			}
+			return "daystats";
 		}
-		elsif ($duration > 2*3600)
+		elsif ($2 eq "w")
 		{
-			return 'hourstats';
+			if ($1 eq "1") {
+				return "daystats";
+			}
+			return "weekstats";
 		}
-	return 'timerange';
-#	my ($duration) = @_;
-#	if ($duration =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
-#	{
-#		if ($2 eq "s" || $2 eq "i")
-#		{
-#			return "timerange";
-#		}
-#		elsif ($2 eq "h")
-#		{
-#			if ($1 eq "1") {
-#				return "timerange";
-#			}
-#			return "hourstats";
-#		}
-#		elsif ($2 eq "d")
-#		{
-#			if ($1 eq "1") {
-#				return "hourstats";
-#			}
-#			return "daystats";
-#		}
-#		elsif ($2 eq "w")
-#		{
-#			if ($1 eq "1") {
-#				return "daystats";
-#			}
-#			return "weekstats";
-#		}
-#		elsif ($2 eq "m")
-#		{
-#			if ($1 eq "1") {
-#				return "weekstats";
-#			}
-#			return "monthstats";
-#		}
-#		elsif ($2 eq "y")
-#		{
-#			if ($1 eq "1") {
-#				return "monthstats";
-#			}
-#			return "yearstats";
-#		}
-#	}	
-#	return "timerange";
+		elsif ($2 eq "m")
+		{
+			if ($1 eq "1") {
+				return "weekstats";
+			}
+			return "monthstats";
+		}
+		elsif ($2 eq "y")
+		{
+			if ($1 eq "1") {
+				return "monthstats";
+			}
+			return "yearstats";
+		}
+	}	
+	return "timerange";
 }
 
 sub fronthem_sunrise($) {
@@ -706,13 +684,8 @@ sub Plot(@)
 			
 			my $duration = "timerange";
 			if ($mode ne "raw") {
-				my $duration_seconds = main::fronthem_Time(0, $end) - main::fronthem_Time(0, $start);
-				$duration = main::fronthem_Duration($duration_seconds);
+				$duration = main::fronthem_Duration($start);
 			}
-		
-#			if ($mode ne "raw") {
-#				$duration = main::fronthem_Duration($start);
-#			}
 				
 			my $string = main::CommandGet(undef, $args[0] . ' - webchart ' . $from . ' ' . $to . ' ' . $device . ' ' . $duration . ' TIMESTAMP ' . $reading);
 			my @response = main::fronthem_decodejson($string);
