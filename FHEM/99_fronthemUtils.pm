@@ -42,10 +42,20 @@ fronthem_TimeStamp($)
 
 # evaluates smartVISU duration format with up to 4 digits (instead of 2)
 # loops through the parameter with more terms e.g. "1y 3m 5d 10h" and sum the results up
+# Bonus: a leading term with 0 like e.g. "0w" will not contribute to the total time but it can
+# be used to select the aggregation period for aggregation modes 'avg', 'min', 'sum' etc. in sub fronthem_Duration
 sub
 fronthem_Time($$)
 {
 	my ($time, $period) = @_;
+
+	# allow Unix timestamp in milliseconds as well as "now"
+	if ($period =~ /^(.*?)\s*(\d{13})/) { 
+		return int($2/1000 + 0.5);
+	}
+	if ($period eq "now") {
+		return $time;
+		
 	my @periods = split(' ', $period);  # split parameters like "1y 3m 5d 10h" into an array like ("1y","3m","5d","10h")
 	foreach my $period (@periods) 	    # loop over the individual array elements
 	{
