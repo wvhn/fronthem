@@ -1,6 +1,7 @@
 ##############################################
 # $Id: 99_fronthemUtils.pm 0 2015-11-10 08:00:00Z herrmannj $
 # modified: 2018-04-14 00:00:00Z raman
+# modified: 2022-11-27 11:00:00Z alkazaa and wvhn
 package main;
 
 use strict;
@@ -39,51 +40,58 @@ fronthem_TimeStamp($)
   return $time * 1000;
 }
 
+# evaluates smartVISU duration format with up to 4 digits (instead of 2)
+# loops through the parameter with more terms e.g. "1y 3m 5d 10h" and sum the results up
 sub
 fronthem_Time($$)
 {
 	my ($time, $period) = @_;
-	if ($period =~ /^(\d{1,2})(s|i|h|d|w|m|y)/)
+	my @periods = split(' ', $period);  # split parameters like "1y 3m 5d 10h" into an array like ("1y","3m","5d","10h")
+	foreach my $period (@periods) 	    # loop over the individual array elements
 	{
-		my $newTime = 0;
-		if ($2 eq "s")
+		if ($period =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
 		{
-			$newTime = $1;
+			my $newTime = 0;
+			if ($2 eq "s")
+			{
+				$newTime = $1;
+			}
+			elsif ($2 eq "i")
+			{
+				$newTime = $1 * 60;
+			}
+			elsif ($2 eq "h")
+			{
+				$newTime = $1 * 3600;
+			}
+			elsif ($2 eq "d")
+			{
+				$newTime = $1 * 3600 * 24;
+			}
+			elsif ($2 eq "w")
+			{
+				$newTime = $1 * 3600 * 24 * 7;
+			}
+			elsif ($2 eq "m")
+			{
+				$newTime = $1 * 3600 * 24 * 30;
+			}
+			elsif ($2 eq "y")
+			{
+				$newTime = $1 * 3600 * 24 * 365;
+			}
+			$time = $time - $newTime;
 		}
-		elsif ($2 eq "i")
-		{
-			$newTime = $1 * 60;
-		}
-		elsif ($2 eq "h")
-		{
-			$newTime = $1 * 3600;
-		}
-		elsif ($2 eq "d")
-		{
-			$newTime = $1 * 3600 * 24;
-		}
-		elsif ($2 eq "w")
-		{
-			$newTime = $1 * 3600 * 24 * 7;
-		}
-		elsif ($2 eq "m")
-		{
-			$newTime = $1 * 3600 * 24 * 30;
-		}
-		elsif ($2 eq "y")
-		{
-			$newTime = $1 * 3600 * 24 * 365;
-		}
-		$time = $time - $newTime;
 	}
 	return $time;
 }
 
+# select the database evaluation mode from first term of smartVISU duration, e.g. "0d" is daystats but "1d" is hourstats
 sub
 fronthem_Duration($)    # hourstats daystats weekstats monthstats yearstats
 {
 	my ($duration) = @_;
-	if ($duration =~ /^(\d{1,2})(s|i|h|d|w|m|y)/)
+	if ($duration =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
 	{
 		if ($2 eq "s" || $2 eq "i")
 		{
@@ -656,9 +664,9 @@ sub Plot(@)
 			}
 				
 			my $string = main::CommandGet(undef, $args[0] . ' - webchart ' . $from . ' ' . $to . ' ' . $device . ' ' . $duration . ' TIMESTAMP ' . $reading);
-			my @resonse = main::fronthem_decodejson($string);
+			my @response = main::fronthem_decodejson($string);
 
-			foreach my $data (@resonse) {
+			foreach my $data (@response) {
 				my $i = 0;
 				foreach my $row (@{$data->{data}}) {
 					if ($mode eq "raw") { # [TIMESTAMP,VALUE]
@@ -767,11 +775,11 @@ sub Plotfile(@)
 			$to =~ s/ /_/ig;
 			
 			my $string = main::fhem("get "  . $args[0] . " - - " . $from . " " . $to ." " . $column .":" . $reading . ":0:" . $regex, 1);
-			my @resonse = split("\n", $string);
-			pop @resonse;
+			my @response = split("\n", $string);
+			pop @response;
 			
-			for (my $i = 0; $i < @resonse; $i++) {			
-				$resonse[$i] =~ /([0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2})\s+([0-9\.-]+)/;				
+			for (my $i = 0; $i < @response; $i++) {			
+				$response[$i] =~ /([0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}:[0-9]{2})\s+([0-9\.-]+)/;				
 				push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($1));
 				push(@{$data[0]->{plotdata}[$i]}, sprintf("%#.4f", $2) * 1);
 			}
