@@ -55,7 +55,7 @@ fronthem_Time($$)
 	}
 	if ($period eq "now") {
 		return $time;
-		
+	}	
 	my @periods = split(' ', $period);  # split parameters like "1y 3m 5d 10h" into an array like ("1y","3m","5d","10h")
 	foreach my $period (@periods) 	    # loop over the individual array elements
 	{
