@@ -187,9 +187,16 @@ sub fronthem_sunset($) {
 #
 ###############################################################################
 #
-# Damit die Einstellungen gespeichert werden können, folgendes Attribut setzen:
+# ACHTUNG: falls von einer vorherigen fronthem-Version noch das notify definiert ist 
+# " define UZSU notify .*:uzsu:.* { UZSU_execute($NAME, $EVTPART1) } "
+# dann muss dieses gelöscht werden, da UZSU_Execute sonst doppelt ausgeführt wird 
+# und die Einstellungen wieder löscht!!
 #
+# Damit die Einstellungen gespeichert werden können, folgendes Attribut setzen:
 # attr global autosave 1
+#
+# Bei den Angaben für Conditions und delayedExec muss darauf geachtet werden, dass 
+# am Ende der jeweiligen Strings keine überzähligen Leerzeichen vorkommen.
 #
 sub UZSU_execute($$;$)
 {
