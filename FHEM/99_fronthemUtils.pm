@@ -195,8 +195,6 @@ sub fronthem_sunset($) {
 # Damit die Einstellungen gespeichert werden können, folgendes Attribut setzen:
 # attr global autosave 1
 #
-# Bei den Angaben für Conditions und delayedExec muss darauf geachtet werden, dass 
-# am Ende der jeweiligen Strings keine überzähligen Leerzeichen vorkommen.
 #
 sub UZSU_execute($$;$)
 {
@@ -283,7 +281,7 @@ sub UZSU_getCommand($)
     {
       return ' {' . $command->{deviceString} . '}';
     }
-    elsif($command->{deviceString} =~ /(setstate|setreading|set).([a-zA-Z]+)$/)
+    elsif($command->{deviceString} =~ /(setstate|setreading|set)\s+([a-zA-Z]+)\s*$/)
     {
       return ' ' . $1 . ' $NAME ' . $2 . ' $EVENT';
     }
