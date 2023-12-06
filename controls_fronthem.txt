@@ -1,6 +1,6 @@
 UPD 2022-09-11_16:16:37 28798 FHEM/01_fronthem.pm
 UPD 2022-09-08_19:16:02 28957 FHEM/31_fronthemDevice.pm
-UPD 2022-09-11_16:16:37 24622 FHEM/99_fronthemUtils.pm
+UPD 2022-09-11_16:16:37 32599 FHEM/99_fronthemUtils.pm
 UPD 2022-09-09_23:43:13 7476 FHEM/fhwebsocket.pm
 UPD 2019-01-03_11:22:09 9811 FHEM/fhconverter.pm
 UPD 2022-09-08_18:55:13 14158 www/pgm2/fronthemEditor.js
