@@ -59,6 +59,7 @@ fronthem_Time($$)
 	if ($period eq "now") {
 		return $time;
 	}
+
 	# alkazaa
 	# the next 'if' is meant to parse a tmin or tmax parameter of the form "0w 2022-12-01 12:34:56"
 	# It converts correctly for further processing, however, it is not working with SmartVISU, since
@@ -67,10 +68,10 @@ fronthem_Time($$)
 		return timelocal($7,$6,$5,$4,$3-1,$2);
 	}
 
-	my @periods = split(' ', $period);  # alkazaa: split composed time specifications like "1y 3m 5d 10h" 
+	my @periods = split(' ', $period);  # alkazaa: split composed time specifications like "1y 3m 5d 10h"
 	foreach my $period (@periods) 	    # into an array like ("1y","3m","5d","10h") and loop over array elements
 	{
-		if ($period =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
+		if ($period =~ /^([-+]?\d{1,4})(s|i|h|d|w|m|y)/)
 		{
 			my $newTime = 0;
 			if ($2 eq "s")
@@ -101,7 +102,7 @@ fronthem_Time($$)
 			{
 				$newTime = $1 * 3600 * 24 * 365;
 			}
-			$time = $time - $newTime; 		
+			$time -= $newTime;
 		}
 
 	}
