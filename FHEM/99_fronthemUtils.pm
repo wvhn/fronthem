@@ -219,6 +219,7 @@ sub UZSU_execute($$;$)
       fhem('defmod wdt_uzsu_' . $device . '_' . $i . ' WeekdayTimer ' . $device . ' en ' . $weekdayTimer . $condition);
       fhem('attr wdt_uzsu_' . $device . '_' . $i . ' room Automation->UZSU');
       fhem('attr wdt_uzsu_' . $device . '_' . $i . ' group ' . $device);
+      fhem('attr wdt_uzsu_' . $device . '_' . $i . ' DbLogExclude .* ');
       fhem('setreading wdt_uzsu_' . $device . '_' . $i . ' weekdays ' . $weekdayTimer);
       fhem('defmod rg_uzsu_' . $device . ' readingsGroup wdt_uzsu_' . $device . '.*');
       fhem('attr rg_uzsu_' . $device . ' room Automation->UZSU');
