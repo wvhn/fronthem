@@ -838,7 +838,7 @@ fronthem_wsIpcRead(@)
   while (($serv->{buffer} =~ m/\n/) && (($msg, $serv->{buffer}) = split /\n/, $serv->{buffer}, 2))
   {
     eval {
-      # $msg = Encode::encode('UTF-8', $msg);
+      $msg = Encode::encode('UTF-8', $msg);
       $msg = decode_json($msg);
     } or do {
       fronthem_forkLog3 ($serv->{ipc}, 1, "$serv->{id} ipc decoding error $@") if ($@);
