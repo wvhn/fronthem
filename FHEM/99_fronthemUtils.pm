@@ -188,7 +188,8 @@ sub fronthem_sunset($) {
 #
 ###############################################################################
 #
-# ACHTUNG: falls von einer vorherigen fronthem-Version noch das notify definiert ist 
+# ACHTUNG: der Aufruf erfolgt jetzt direkt aus dem UZSU-Konverter (siehe unten)!
+# Falls von einer vorherigen fronthem-Version noch das notify definiert ist 
 # " define UZSU notify .*:uzsu:.* { UZSU_execute($NAME, $EVTPART1) } "
 # dann muss dieses gelöscht werden, da UZSU_Execute sonst doppelt ausgeführt wird 
 # und die Einstellungen wieder löscht!!
@@ -454,7 +455,7 @@ use warnings;
 ###############################################################################
 # For use with UZSU-Widget in SV and UZSU-notify in fhem
 # Setreading a device reading using JSON conversion (gadval => reading=decode_json() => setval => encode_json(reading) )
-# the reading ("uzsu") must be created manually for each UZSU-enabled device in fhem using "setreading <device> uzsu {}"
+# the reading ("uzsu") must be created manually for each UZSU-enabled device in fhem using "setreading <device> uzsu {"active":false,"list":[]}"
 # in the fhem commandline
 ###############################################################################
 
