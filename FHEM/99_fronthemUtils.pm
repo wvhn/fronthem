@@ -409,7 +409,7 @@ use warnings;
 ###############################################################################
 # For use with UZSU-Widget in SV and UZSU-notify in fhem
 # Setreading a device reading using JSON conversion (gadval => reading=decode_json() => setval => encode_json(reading) )
-# the reading ("uzsu") must be created manually for each UZSU-enabled device in fhem using "setreading <device> uzsu {}"
+# the reading ("uzsu") must be created manually for each UZSU-enabled device in fhem using "setreading <device> uzsu {"active:false,"list":[]}
 # in the fhem commandline
 ###############################################################################
 
