@@ -163,13 +163,16 @@ sub fronthem_sunset($) {
 #
 ###############################################################################
 #
-# Nicht vergessen! In FHEM notify definieren!
+# ACHTUNG: der Aufruf erfolgt jetzt direkt aus dem UZSU-Konverter (siehe unten)!
+# Falls von einer vorherigen fronthem-Version noch das notify definiert ist
+# " define UZSU notify .*:uzsu:.* { UZSU_execute($NAME, $EVTPART1) } "
+# dann muss dieses gelöscht werden, da UZSU_Execute sonst doppelt ausgeführt wird
+# und die Einstellungen wieder löscht!!
 #
-#    define UZSU notify .*:uzsu:.* { UZSU_execute($NAME, $EVTPART1) }
-#
-# oder wenn Einstellungen gespeichert werden sollen:
-#
-#    define UZSU notify .*:uzsu:.* { UZSU_execute($NAME, $EVTPART1, 'save') }
+# Wenn als 'device string' ein Kommando set, setreading oder setstate übergeben werden soll, dann musste bisher
+# das komplette Kommando z.B. 'set $NAME level $EVENT' angegeben werden. Hier ist jetzt nur noch
+# 'set level' anzugeben. $NAME und $EVENT werden automatisch ergänzt. Das führt aber zu Fehlern,
+# wenn noch die alte Schreibweise verwendet wird. Die device strings müssen daher zwingend umgestellt werden.
 #
 # Damit die Einstellungen gespeichert werden können, folgendes Attribut setzen:
 # attr global autosave 1
@@ -178,9 +181,10 @@ sub fronthem_sunset($) {
 sub UZSU_execute($$;$)
 {
   my ($device, $uzsu, $save) = @_;
-    $uzsu = decode_json($uzsu);
-
-  fhem('delete wdt_uzsu_'.$device.'.*');
+  $save = (defined($save) ? $save : "na");
+  my $rg = AttrVal('rg_uzsu_'.$device, "room", "na");
+  fhem('delete wdt_uzsu_'.$device.'.*') if($rg ne "na");
+  fhem('delete rg_uzsu_'.$device) if($rg ne "na");
 
   for (my $i = 0; $i < @{$uzsu->{list}}; $i++) {
     if ($uzsu->{list}[$i]->{active}) {
@@ -258,6 +262,10 @@ sub UZSU_getCommand($)
     if($command->{deviceString} =~ /^fhem ".+"( if\(.+\))?$/)
     {
       return ' {' . $command->{deviceString} . '}';
+    }
+    elsif($command->{deviceString} =~ /(setstate|setreading|set)\s+([a-zA-Z]+)\s*$/)
+    {
+      return ' ' . $1 . ' $NAME ' . $2 . ' $EVENT';
     }
     else
     {
@@ -444,6 +452,12 @@ sub UZSU(@)
 
   my @args = @{$param->{args}};
   my $cache = $param->{cache};
+  my $save = '';
+
+  if (@args == 1 && $args[0] eq 'save')
+  {
+    $save = 'save';
+  }
 
   if ($param->{cmd} eq 'get')
   {
@@ -463,6 +477,7 @@ sub UZSU(@)
   }
   elsif ($param->{cmd} eq 'rcv')
   {
+    main::UZSU_execute($device, $gadval, $save);
     $gadval = main::fronthem_encodejson($gadval);
     $gadval =~ s/;/;;/ig;
     $param->{result} = main::fhem("setreading $device $reading $gadval");

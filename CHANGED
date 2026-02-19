@@ -9,6 +9,9 @@
 2022-11-19
 - workaround for sporadic fhem crashes
 
+2022-09-09 (pull request separated and refactored: 2026-02-19)
+- let UZSU execute without notify: thx raman
+
 2022-09-08
 - Adaptions to smartVISU v2.9+ from 2018: thx raman
 
