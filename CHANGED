@@ -1,3 +1,9 @@
+2023-12-18
+- extended plot durations to allow usage of all smartVISU plot features
+
+2022-11-19
+- workaround for sporadic fhem crashes
+
 2022-09-08
 - Adaptions to smartVISU v2.9+ from 2018: thx raman
 
