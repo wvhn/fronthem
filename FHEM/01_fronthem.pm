@@ -7,11 +7,11 @@
 
 # fixed:
 # issue with some JSON module at startup
-# perl before 5.14 issue 
+# perl before 5.14 issue
 # remove debug output
 
 # open:
-# UTF8 conversation 
+# UTF8 conversation
 # num converter with negative values
 # 99er converter (see reload)
 
@@ -30,6 +30,7 @@ use IO::Select;
 use fhwebsocket;
 use JSON;
 use utf8;
+use Encode;
 
 use Data::Dumper;
 
@@ -40,14 +41,15 @@ fronthem_Initialize(@)
 {
 
   my ($hash) = @_;
-  
+
   $hash->{DefFn}      = "fronthem_Define";
   $hash->{SetFn}      = "fronthem_Set";
   $hash->{ReadFn}     = "fronthem_Read";
+  $hash->{AttrFn}     = "fronthem_Attr";
   $hash->{UndefFn}    = "fronthem_Undef";
   $hash->{NotifyFn}   = "fronthem_Notify";
   $hash->{ShutdownFn} = "fronthem_Shutdown";
-  $hash->{AttrList}   = "configFile ".$readingFnAttributes;
+  $hash->{AttrList}   = "configFile maxSendSize port ".$readingFnAttributes;
 }
 
 sub
@@ -56,46 +58,27 @@ fronthem_Define($$)
   my ($hash, $def) = @_;
   my @a = split("[ \t][ \t]*", $def);
   my $name = $a[0];
-  my $cfg;
 
   $hash->{helper}->{COMMANDSET} = 'save';
 
-  #TODO move it to "initialized"
-  fronthem_ReadCfg($hash, 'fronthem.cfg');
-  
-  my $port = 16384;
+  $hash->{helper}->{ipcPort} = 16384;
   # create and register server ipc parent (listener == socket)
   do
   {
     $hash->{helper}->{listener} = IO::Socket::INET->new(
       LocalHost => 'localhost',
-      LocalPort => $port, 
-      Listen => SOMAXCONN, 
+      LocalPort => $hash->{helper}->{ipcPort},
+      Listen => SOMAXCONN,
       Reuse => 1 );
-    $port++;
+    $hash->{helper}->{ipcPort} += 1;
   } until (defined($hash->{helper}->{listener}));
-  $port -= 1;
+  $hash->{helper}->{ipcPort} -= 1;
   my $flags = fcntl($hash->{helper}->{listener}, F_GETFL, 0) or return "error shaping ipc: $!";
   fcntl($hash->{helper}->{listener}, F_SETFL, $flags | O_NONBLOCK) or return "error shaping ipc: $!";
-  Log3 ($hash, 2, "$hash->{NAME}: ipc listener opened at port $port");
+  Log3 ($hash, 2, "$hash->{NAME}: ipc listener opened at port $hash->{helper}->{ipcPort}");
   $hash->{TCPDev} = $hash->{helper}->{listener};
   $hash->{FD} = $hash->{helper}->{listener}->fileno();
   $selectlist{"$name:ipcListener"} = $hash;
-
-  $hash->{helper}->{main}->{state} = 'run';
-  if ($init_done)
-  {
-    # TODO set initial readings
-  }
-
-  # prepare forking the ws server
-  $cfg->{hash} = $hash;
-  $cfg->{id} = 'ws';
-  $cfg->{port} = 2121;
-  $cfg->{ipcPort} = $port;
-  # preserve 
-  $hash->{helper}->{main}->{state} = 'run';
-  fronthem_StartWebsocketServer($cfg);
 
   return undef;
 }
@@ -114,8 +97,8 @@ fronthem_Set(@)
 }
 
 #ipc, accept from forked socket server
-sub 
-fronthem_Read(@) 
+sub
+fronthem_Read(@)
 {
   my ($hash) = @_;
   my $ipcClient = $hash->{helper}->{listener}->accept();
@@ -123,7 +106,7 @@ fronthem_Read(@)
   fcntl($ipcClient, F_SETFL, $flags | O_NONBLOCK) or return "error shaping ipc client: $!";
 
   # TODO connections from other then localhost possible||usefull ? evaluate the need ...
-  
+
   my $ipcHash;
   $ipcHash->{TCPDev} = $ipcClient;
   $ipcHash->{FD} = $ipcClient->fileno();
@@ -141,7 +124,7 @@ fronthem_Read(@)
   return undef;
 }
 
-sub 
+sub
 fronthem_Notify($$)
 {
   my ($hash, $ntfyDev) = @_;
@@ -158,7 +141,19 @@ fronthem_Notify($$)
       #Log3 ($hash, 1, "in $e[0]"); #TODO remove
       if ($e[0] eq 'INITIALIZED')
       {
-        #
+        fronthem_ReadCfg($hash, 'fronthem.cfg');
+        $hash->{MAXSENDSIZE} = AttrVal( $name, "maxSendSize", "65536" );
+        $hash->{PORT} = AttrVal( $name, "port", "2121" );
+        # prepare forking the ws server
+        my $cfg;
+        $cfg->{hash} = $hash;
+        $cfg->{id} = 'ws';
+        $cfg->{port} = $hash->{PORT};
+        $cfg->{ipcPort} = $hash->{helper}->{ipcPort};
+        $cfg->{max_send_size} = $hash->{MAXSENDSIZE};
+        # preserve
+        $hash->{helper}->{main}->{state} = 'run';
+        fronthem_StartWebsocketServer($cfg);
       }
       elsif ($e[0] eq 'RENAMED')
       {
@@ -173,19 +168,43 @@ fronthem_Notify($$)
   elsif ( $ntfyDevName ne $name ) {
     return undef
   }
-  
+
   foreach my $change (@{$ntfyDev->{CHANGED}}) {
-	readingsBeginUpdate($hash);
-	#Log3 $name, 1, "fronthem $name: change: $change.";
-		
-	if ($change =~ /^(.+): (.+)/) {
-	  if($1 eq "ws") {
-		readingsBulkUpdate($hash, "state", $2);
-	  }
-	}
+    readingsBeginUpdate($hash);
+    #Log3 $name, 1, "fronthem $name: change: $change.";
+
+    if ($change =~ /^(.+): (.+)/) {
+      if($1 eq "ws") {
+        readingsBulkUpdate($hash, "state", $2);
+      }
+    }
   }
   readingsEndUpdate($hash, 1);
   return undef;
+}
+
+sub
+fronthem_Attr(@)
+{
+  my ($type, $devName, $attrName, @param) = @_;
+  my $hash = $defs{$devName};
+  #Log3 $devName, 1, "01_fronthem: $type - $devName - $attrName - $param[0]";
+
+  if($type eq "set" && $attrName eq "maxSendSize" && $param[0]) {
+    $hash->{MAXSENDSIZE} = $param[0];
+  }
+
+  if($type eq "set" && $attrName eq "port" && $param[0]) {
+    $hash->{PORT} = $param[0];
+  }
+
+  if($type eq "del" && $attrName eq "maxSendSize") {
+    $hash->{MAXSENDSIZE} = 65536;
+  }
+
+  if($type eq "del" && $attrName eq "port") {
+    $hash->{PORT} = 2121;
+  }
 }
 
 sub
@@ -208,8 +227,8 @@ fronthem_Shutdown(@)
 }
 
 #ipc, read msg from forked socket server
-sub 
-fronthem_ipcRead($) 
+sub
+fronthem_ipcRead($)
 {
   my ($ipcHash) = @_;
   my $msg = "";
@@ -243,14 +262,15 @@ fronthem_ipcRead($)
 
     if (defined($ipcHash->{registered}))
     {
-      $id = $ipcHash->{registered}; 
+      $id = $ipcHash->{registered};
       # TODO check if a dispatcher is set
-      eval 
+      eval
       {
+        $msg = Encode::encode('UTF-8', $msg);
         $up = decode_json($msg);
-    
+
         Log3 ($ipcHash->{PARENT}, $up->{log}->{level}, "ipc $ipcHash->{NAME} ($id): $up->{log}->{text}") if (exists($up->{log}) && (($up->{log}->{cmd} || '') eq 'log'));
-        #keep global cfg up to date, add new items 
+        #keep global cfg up to date, add new items
         if (exists($up->{message}) && (($up->{message}->{cmd} || '') eq 'monitor'))
         {
           foreach my $item (@{$up->{message}->{items}})
@@ -258,40 +278,41 @@ fronthem_ipcRead($)
             $ipcHash->{PARENT}->{helper}->{config}->{$item}->{type} = 'item' unless defined($ipcHash->{PARENT}->{helper}->{config}->{$item}->{type});
           }
         }
-		if (exists($up->{message}) && (($up->{message}->{cmd} || '') eq 'plot'))
+        if (exists($up->{message}) && (($up->{message}->{cmd} || '') eq 'plot'))
         {
-		  foreach my $item (@{$up->{message}->{items}})
-		  {
-			  my $gad = $item->{item};
-			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{type} = 'plot';
-			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{mode} = $item->{mode};
-			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{start} = $item->{start};
-			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{end} = $item->{end};
-			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{count} = $item->{count};
-			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{interval} = $item->{interval};
-			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{updatemode} = $item->{updatemode};
-			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{datamode} = $item->{datamode};
-			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{gad} = $item->{item} if (defined($item->{item}));
-			  $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{gads} = $item->{items} if (defined($item->{items})); 
-		  }
+          foreach my $item (@{$up->{message}->{items}})
+          {
+              my $gad = $item->{item};
+              $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{type} = 'plot';
+              $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{mode} = $item->{mode};
+              $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{start} = $item->{start};
+              $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{end} = $item->{end};
+              $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{count} = $item->{count};
+              $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{interval} = $item->{interval};
+              $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{updatemode} = $item->{updatemode};
+              $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{datamode} = $item->{datamode};
+              $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{gad} = $item->{item} if (defined($item->{item}));
+              $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{gads} = $item->{items} if (defined($item->{items}));
+          }
         }
-		if (exists($up->{message}) && (($up->{message}->{cmd} || '') eq 'log'))
-		{
-		  foreach my $item (@{$up->{message}->{items}})
-		  {
-			my $gad = $item->{item};
-			$ipcHash->{PARENT}->{helper}->{config}->{$gad}->{type} = 'log';			 
-			$ipcHash->{PARENT}->{helper}->{config}->{$gad}->{size} = $item->{size};
-		  }
-		} 
+        if (exists($up->{message}) && (($up->{message}->{cmd} || '') eq 'log'))
+        {
+          foreach my $item (@{$up->{message}->{items}})
+          {
+            my $gad = $item->{item};
+            $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{type} = 'log';
+            $ipcHash->{PARENT}->{helper}->{config}->{$gad}->{size} = $item->{size};
+          }
+      }
         fronthem_ProcessDeviceMsg($ipcHash, $up) if (exists($up->{message}));
+      } or do {
+        Log3 ($ipcHash->{PARENT}, 2, "ipc $ipcHash->{NAME} ($id): error $@ decoding ipc msg $msg") if ($@);
       };
-      Log3 ($ipcHash->{PARENT}, 2, "ipc $ipcHash->{NAME} ($id): error $@ decoding ipc msg $msg") if ($@);
     }
     else
     {
       # first incoming msg, must contain id:pid (name) of forked child
-      # security check, see if we are waiting for. id and pid should be registered in $hash->{helper}->{ipc}->{$id}->{pid} before incoming will be accepted 
+      # security check, see if we are waiting for. id and pid should be registered in $hash->{helper}->{ipc}->{$id}->{pid} before incoming will be accepted
       if (($msg =~ m/^(\w+):(\d+)$/) && ($ipcHash->{PARENT}->{helper}->{ipc}->{$1}->{pid} eq $2))
       {
         ($id,$pid) = ($1, $2);
@@ -316,7 +337,7 @@ fronthem_ipcRead($)
 
 # id: eq ws,wss
 # msg: whats to tell
-sub 
+sub
 fronthem_ipcWrite(@)
 {
   my ($hash, $id, $msg) = @_;
@@ -330,19 +351,19 @@ fronthem_ipcWrite(@)
   my $out = to_json($msg)."\n";
   my $lin = length $out;
   my $result = $hash->{helper}->{ipc}->{$id}->{sock}->{TCPDev}->send($out);
-  
-  if (!defined($result)) 
+
+  if (!defined($result))
   {
     Log3 ($hash, 1, "$hash->{NAME} send to $id (ipc to child) unkown error");
     fronthem_DisconnectClients($hash, $id);
     return undef;
   }
-  if ($result != $lin) 
+  if ($result != $lin)
   {
     Log3 ($hash, 1, "$hash->{NAME} send to $id (ipc to child) in $lin send $result");
     return undef;
   }
-  
+
   return undef;
 }
 
@@ -360,7 +381,7 @@ fronthem_DisconnectClients(@)
   return undef;
 }
 
-# forced disonnect 
+# forced disonnect
 sub
 fronthem_DisconnectClient(@)
 {
@@ -404,10 +425,10 @@ fronthem_ReadCfg(@)
 
   my $data;
   my $filtered->{config} = {};
-  
+
   if (length($json_text))
   {
-    eval 
+    eval
     {
       my $json = JSON->new->utf8;
       $data = $json->decode($json_text);
@@ -427,21 +448,21 @@ fronthem_ReadCfg(@)
       $filtered->{config}->{$key}->{reading} = $data->{config}->{$key}->{reading};
       $filtered->{config}->{$key}->{converter} = $data->{config}->{$key}->{converter};
       $filtered->{config}->{$key}->{set} = $data->{config}->{$key}->{set};
-	  
-	  if ($data->{config}->{$key}->{type} eq 'plot')
-	  {
-		$filtered->{config}->{$key}->{start} = $data->{config}->{$key}->{start};
-		$filtered->{config}->{$key}->{end} = $data->{config}->{$key}->{end};
-		$filtered->{config}->{$key}->{mode} = $data->{config}->{$key}->{mode};
-		$filtered->{config}->{$key}->{interval} = $data->{config}->{$key}->{interval};
-		$filtered->{config}->{$key}->{updatemode} = $data->{config}->{$key}->{updatemode};
-		$filtered->{config}->{$key}->{datamode} = $data->{config}->{$key}->{datamode};
-	  }
-	  
-	  if ($data->{config}->{$key}->{type} eq 'log')
-	  {
-		$filtered->{config}->{$key}->{size} = $data->{config}->{$key}->{size};
-	  }	  	  
+
+      if ($data->{config}->{$key}->{type} eq 'plot')
+      {
+        $filtered->{config}->{$key}->{start} = $data->{config}->{$key}->{start};
+        $filtered->{config}->{$key}->{end} = $data->{config}->{$key}->{end};
+        $filtered->{config}->{$key}->{mode} = $data->{config}->{$key}->{mode};
+        $filtered->{config}->{$key}->{interval} = $data->{config}->{$key}->{interval};
+        $filtered->{config}->{$key}->{updatemode} = $data->{config}->{$key}->{updatemode};
+        $filtered->{config}->{$key}->{datamode} = $data->{config}->{$key}->{datamode};
+      }
+
+      if ($data->{config}->{$key}->{type} eq 'log')
+      {
+        $filtered->{config}->{$key}->{size} = $data->{config}->{$key}->{size};
+      }
     }
   }
 
@@ -459,7 +480,7 @@ fronthem_WriteCfg(@)
 
   $cfgContent->{version} = '1.0';
   $cfgContent->{modul} = 'fronthem-server';
-  
+
   foreach my $key (keys %{ $hash->{helper}->{config} })
   {
     if ($hash->{helper}->{config}->{$key}->{type} eq 'item')
@@ -470,29 +491,29 @@ fronthem_WriteCfg(@)
       $cfgContent->{config}->{$key}->{converter} = $hash->{helper}->{config}->{$key}->{converter};
       $cfgContent->{config}->{$key}->{set} = $hash->{helper}->{config}->{$key}->{set};
     }
-	elsif ($hash->{helper}->{config}->{$key}->{type} eq 'log')
+    elsif ($hash->{helper}->{config}->{$key}->{type} eq 'log')
     {
       $cfgContent->{config}->{$key}->{type} = $hash->{helper}->{config}->{$key}->{type};
-	  $cfgContent->{config}->{$key}->{size} = $hash->{helper}->{config}->{$key}->{size};
+      $cfgContent->{config}->{$key}->{size} = $hash->{helper}->{config}->{$key}->{size};
       $cfgContent->{config}->{$key}->{device} = $hash->{helper}->{config}->{$key}->{device};
       $cfgContent->{config}->{$key}->{reading} = $hash->{helper}->{config}->{$key}->{reading};
       $cfgContent->{config}->{$key}->{converter} = $hash->{helper}->{config}->{$key}->{converter};
       $cfgContent->{config}->{$key}->{set} = $hash->{helper}->{config}->{$key}->{set};
     }
-	elsif ($hash->{helper}->{config}->{$key}->{type} eq 'plot')
+    elsif ($hash->{helper}->{config}->{$key}->{type} eq 'plot')
     {
       $cfgContent->{config}->{$key}->{type} = $hash->{helper}->{config}->{$key}->{type};
       $cfgContent->{config}->{$key}->{device} = $hash->{helper}->{config}->{$key}->{device};
       $cfgContent->{config}->{$key}->{reading} = $hash->{helper}->{config}->{$key}->{reading};
       $cfgContent->{config}->{$key}->{converter} = $hash->{helper}->{config}->{$key}->{converter};
       $cfgContent->{config}->{$key}->{set} = $hash->{helper}->{config}->{$key}->{set};
-	  
-	  $cfgContent->{config}->{$key}->{start} = $hash->{helper}->{config}->{$key}->{start};
-	  $cfgContent->{config}->{$key}->{end} = $hash->{helper}->{config}->{$key}->{end};
-	  $cfgContent->{config}->{$key}->{mode} = $hash->{helper}->{config}->{$key}->{mode};
-	  $cfgContent->{config}->{$key}->{interval} = $hash->{helper}->{config}->{$key}->{interval};
-	  $cfgContent->{config}->{$key}->{updatemode} = $hash->{helper}->{config}->{$key}->{updatemode};
-	  $cfgContent->{config}->{$key}->{datamode} = $hash->{helper}->{config}->{$key}->{datamode};
+
+      $cfgContent->{config}->{$key}->{start} = $hash->{helper}->{config}->{$key}->{start};
+      $cfgContent->{config}->{$key}->{end} = $hash->{helper}->{config}->{$key}->{end};
+      $cfgContent->{config}->{$key}->{mode} = $hash->{helper}->{config}->{$key}->{mode};
+      $cfgContent->{config}->{$key}->{interval} = $hash->{helper}->{config}->{$key}->{interval};
+      $cfgContent->{config}->{$key}->{updatemode} = $hash->{helper}->{config}->{$key}->{updatemode};
+      $cfgContent->{config}->{$key}->{datamode} = $hash->{helper}->{config}->{$key}->{datamode};
     }
   }
 
@@ -523,8 +544,8 @@ fronthem_CreateListen(@)
   {
     my $gad = $hash->{helper}->{config}->{$key};
     $listen->{$gad->{device}}->{$gad->{reading}}->{$key} = $hash->{helper}->{config}->{$key} if ((defined($gad->{device})) && (defined($gad->{reading})));
-	$plotlisten->{$gad->{device}}->{$gad->{reading}}->{$key} = $hash->{helper}->{config}->{$key} if ((defined($gad->{device})) && (defined($gad->{reading})) && $gad->{type} eq 'plot');
-	$loglisten->{$gad->{device}}->{$gad->{reading}}->{$key} = $hash->{helper}->{config}->{$key} if ((defined($gad->{device})) && (defined($gad->{reading})) && $gad->{type} eq 'log');
+    $plotlisten->{$gad->{device}}->{$gad->{reading}}->{$key} = $hash->{helper}->{config}->{$key} if ((defined($gad->{device})) && (defined($gad->{reading})) && $gad->{type} eq 'plot');
+    $loglisten->{$gad->{device}}->{$gad->{reading}}->{$key} = $hash->{helper}->{config}->{$key} if ((defined($gad->{device})) && (defined($gad->{reading})) && $gad->{type} eq 'log');
   }
   $hash->{helper}->{listen} = $listen;
   $hash->{helper}->{plot} = $plotlisten;
@@ -544,14 +565,14 @@ fronthem_ProcessDeviceMsg(@)
 {
   my ($ipcHash, $msg) = @_;
 
-  my $hash = $ipcHash->{PARENT};  
+  my $hash = $ipcHash->{PARENT};
 
   my $connection = $ipcHash->{registered}.':'.$msg->{'connection'};
   my $sender = $msg->{'sender'};
   my $identity = $msg->{'identity'};
   my $message = $msg->{'message'};
-  
-  #TODO: 
+
+  #TODO:
   # check if device with given identity is already connected
   # if so, reject the connection and give it a hint why
 
@@ -566,7 +587,7 @@ fronthem_ProcessDeviceMsg(@)
     }
     else
     {
-      #TODO error logging, disconnect 
+      #TODO error logging, disconnect
     }
   }
   elsif((($message->{cmd} || '') eq 'handshake') && ($hash->{helper}->{receiver}->{$connection}->{state} eq 'connecting') )
@@ -579,7 +600,7 @@ fronthem_ProcessDeviceMsg(@)
       {
         $hash->{helper}->{receiver}->{$connection}->{device} = $key;
         $hash->{helper}->{receiver}->{$connection}->{state} = 'connected';
-        #build sender 
+        #build sender
         $hash->{helper}->{sender}->{$key}->{connection} = $ipcHash->{registered};
         $hash->{helper}->{sender}->{$key}->{ressource} = $msg->{'connection'};
         $hash->{helper}->{sender}->{$key}->{state} = 'connected';
@@ -609,7 +630,7 @@ fronthem_ProcessDeviceMsg(@)
       {
         $hash->{helper}->{receiver}->{$connection}->{device} = $key;
         $hash->{helper}->{receiver}->{$connection}->{state} = 'connected';
-        #build sender 
+        #build sender
         $hash->{helper}->{sender}->{$key}->{connection} = $ipcHash->{registered};
         $hash->{helper}->{sender}->{$key}->{ressource} = $msg->{'connection'};
         $hash->{helper}->{sender}->{$key}->{state} = 'connected';
@@ -617,8 +638,8 @@ fronthem_ProcessDeviceMsg(@)
       }
     }
   }
-  
-  if(($message->{cmd} || '') eq 'disconnect') 
+
+  if(($message->{cmd} || '') eq 'disconnect')
   {
     my $key = $hash->{helper}->{receiver}->{$connection}->{device};
 
@@ -627,8 +648,8 @@ fronthem_ProcessDeviceMsg(@)
     {
       my $devHash = $defs{$key};
       fronthemDevice_fromDriver($devHash, $msg);
-      delete($hash->{helper}->{sender}->{$key});  
-    }  
+      delete($hash->{helper}->{sender}->{$key});
+    }
     return undef;
   }
 
@@ -645,7 +666,7 @@ fronthem_ProcessDeviceMsg(@)
 #msg is hash from fhem fronthemDevice instance, will be dispatched to forked client, and further to sv client
 #msg->receiver = speaking name (eg tab)
 #msg->ressource
-#msg->message->cmd 
+#msg->message->cmd
 sub
 fronthem_FromDevice(@)
 {
@@ -661,7 +682,7 @@ fronthem_FromDevice(@)
   #ressource within ipc child, leave blank if you want t talk with the process itself
   $msg->{ressource} = $hash->{helper}->{sender}->{$device}->{ressource};
   fronthem_ipcWrite($hash, $connection, $msg);
-  return undef;  
+  return undef;
 }
 
 ###############################################################################
@@ -671,8 +692,9 @@ fronthem_FromDevice(@)
 sub
 fronthem_StartWebsocketServer(@)
 {
-  my ($cfg) = @_;  
+  my ($cfg) = @_;
   my $id = $cfg->{id};
+  my $name = $cfg->{hash}->{NAME};
 
   my $pid = fork();
   return "Error while try to fork $id: $!" unless (defined $pid);
@@ -688,10 +710,10 @@ fronthem_StartWebsocketServer(@)
   setsid();
 
   # close open handles
-  close STDOUT;  
+  close STDOUT;
   open STDOUT, '>/dev/null';
   close STDIN;
-  close STDERR;  
+  close STDERR;
   # open STDERR, '>/dev/null';
   open STDERR, '>>', "fronthem.err";
 
@@ -718,6 +740,7 @@ fronthem_StartWebsocketServer(@)
   $ws->{'ipc'} = $ipc;
   $ws->{id} = $id;
   $ws->{buffer} = '';
+  $ws->{max_send_size} = $cfg->{max_send_size};
   $ws->watch_readable($ipc->fileno() => \&fronthem_wsIpcRead);
 
   fronthem_forkLog3 ($ws->{ipc}, 1, "$ws->{id} could not open port $cfg->{port}") unless $ws->start;
@@ -805,7 +828,7 @@ fronthem_wsIpcRead(@)
   my ($serv, $fh) = @_;
   my $msg = '';
   my $rv;
-  
+
   $rv = $serv->{'ipc'}->recv($msg, POSIX::BUFSIZ, 0);
   unless (defined($rv) && length $msg) {
     $serv -> shutdown();
@@ -815,9 +838,12 @@ fronthem_wsIpcRead(@)
   while (($serv->{buffer} =~ m/\n/) && (($msg, $serv->{buffer}) = split /\n/, $serv->{buffer}, 2))
   {
     eval {
+      $msg = Encode::encode('UTF-8', $msg);
       $msg = decode_json($msg);
+    } or do {
+      fronthem_forkLog3 ($serv->{ipc}, 1, "$serv->{id} ipc decoding error $@") if ($@);
+      $msg = {};
     };
-    fronthem_forkLog3 ($serv->{ipc}, 1, "$serv->{id} ipc decoding error $@") if ($@);
     fronthem_wsProcessInboundCmd($serv, $msg);
   }
   return undef;
@@ -825,7 +851,7 @@ fronthem_wsIpcRead(@)
 
 #msg->receiver = speaking name (eg tab)
 #msg->ressource
-#msg->message->cmd 
+#msg->message->cmd
 
 sub
 fronthem_wsProcessInboundCmd(@)
@@ -847,37 +873,62 @@ fronthem_wsProcessInboundCmd(@)
 =item summary_DE fronthem websocket Schnittstelle f&uuml;r FHEM
 =begin html
 
-	<p>
-		<a name="fronthem" id="fronthem"></a>
-	</p>
-	<h3>
-		fronthem
-	</h3>
-	<ul>
-		<a name="fronthemdefine" id="fronthemdefine"></a> <b>Define</b>
-		<ul>
-			<code>define &lt;name&gt; fronthem</code><br>
-		</ul><br>
-	</ul>
-	
+    <p>
+        <a name="fronthem" id="fronthem"></a>
+    </p>
+    <h3>
+        fronthem
+    </h3>
+    <ul>
+        <a name="fronthemdefine" id="fronthemdefine"></a> <b>Define</b>
+        <ul>
+            <code>define &lt;name&gt; fronthem</code><br>
+        </ul><br>
+    </ul><br>
+    <br>
+    <a name="fronthemget" id="fronthemget"></a> <b>Attributes</b>
+    <ul>
+        Attributes (restart of FHEM necessary in case of changes):
+        <ul>
+            <li>
+                <b>maxSendSize</b> &nbsp;&nbsp;-&nbsp;&nbsp; default: 65536, 0 to disable payload size check
+            </li>
+            <li>
+                <b>port</b> &nbsp;&nbsp;-&nbsp;&nbsp; default: 2121
+            </li>
+        </ul>
+    </ul>
+
 =end html
 
 =begin html_DE
 
-	<p>
-		<a name="fronthem" id="fronthem"></a>
-	</p>
-	<h3>
-		fronthem
-	</h3>
-	<ul>
-		<a name="fronthemdefine" id="fronthemdefine"></a> <b>Define</b>
-		<ul>
-			<code>define &lt;name&gt; fronthem</code><br>
-		</ul><br>
-	</ul>
-	
+    <p>
+        <a name="fronthem" id="fronthem"></a>
+    </p>
+    <h3>
+        fronthem
+    </h3>
+    <ul>
+        <a name="fronthemdefine" id="fronthemdefine"></a> <b>Define</b>
+        <ul>
+            <code>define &lt;name&gt; fronthem</code><br>
+        </ul><br>
+    </ul><br>
+    <br>
+    <a name="fronthemget" id="fronthemget"></a> <b>Attribute</b>
+    <ul>
+        Attribute (bei &Auml;nderungen Neustart von FHEM n&ouml;tig):
+        <ul>
+            <li>
+                <b>maxSendSize</b> &nbsp;&nbsp;-&nbsp;&nbsp; Standard: 65536, Wert 0 deaktiviert payload size check
+            </li>
+            <li>
+                <b>port</b> &nbsp;&nbsp;-&nbsp;&nbsp; Standard: 2121
+            </li>
+        </ul>
+    </ul>
+
 =end html_DE
 
 =cut
-
