@@ -6,6 +6,9 @@
 2023-12-18
 - extended plot durations to allow usage of all smartVISU plot features
 
+2023-01-20 pull request separated and refactored: 2026-02-19)
+- new plot statistics / durations: thx alkazaa
+
 2022-11-19
 - workaround for sporadic fhem crashes
 

@@ -56,6 +56,15 @@ fronthem_Time($$)
     if ($period eq "now") {
         return $time;
     }
+
+    # alkazaa
+    # the next 'if' is meant to parse a tmin or tmax parameter of the form "0w 2022-12-01 12:34:56"
+    # It converts correctly for further processing, however, it is not working with SmartVISU, since
+    # within the SV plot.period widget such a tmin statement does not produce the correct x-axis
+    if ($period =~ /^(.*?)\s*(\d{4})-(\d{2})-(\d{2})\s(\d{2}):(\d{2}):(\d{2})/) {
+        return timelocal($7,$6,$5,$4,$3-1,$2);
+    }
+
     my @periods = split(' ', $period);  # split parameters like "1y 3m 5d 10h" into an array like ("1y","3m","5d","10h")
     foreach my $period (@periods)         # and loop over the array elements
     {
@@ -98,15 +107,26 @@ fronthem_Time($$)
 
 # select the database evaluation mode from first term of smartVISU duration, e.g. "0d" is daystats but "1d" is hourstats
 # available: timerange hourstats daystats weekstats monthstats yearstats
+# new: minutestats quarterhourstats quarterdaystats (alkazaa)-
 sub
 fronthem_Duration($)
 {
     my ($duration) = @_;
-    if ($duration =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
+    if ($duration =~ /^(\d{1,4})(s|i|h|d|w|m|y|q|x)/)
     {
-        if ($2 eq "s" || $2 eq "i")
+        if ($2 eq "s" )
         {
             return "timerange";
+        }
+        elsif ($2 eq "i")
+        {
+            if ($1 eq "1") {
+                return "timerange";
+            }
+            return "minutestats";
+        }
+        elsif ($2 eq "q") {
+            return "quarterhourstats";
         }
         elsif ($2 eq "h")
         {
@@ -114,6 +134,9 @@ fronthem_Duration($)
                 return "timerange";
             }
             return "hourstats";
+        }
+        elsif ($2 eq "x") {
+            return "quarterdaystats";
         }
         elsif ($2 eq "d")
         {
@@ -748,47 +771,118 @@ sub Plot(@)
 
             }
         }
-        else {
-            my $from = main::FmtDateTime(main::fronthem_Time(time(), $start));
-            $from =~ s/ /_/ig;
-            my $to = main::FmtDateTime(main::fronthem_Time(time(), $end));
-            $to =~ s/ /_/ig;
-
+        else {    # alkazaa
+            my $string = '';
             my $duration = "timerange";
-            if ($mode ne "raw") {
+            if ($mode ne "raw") { # for all modes except 'raw' the aggregation period is evaluated from the pirst term in argument '$start'
                 $duration = main::fronthem_Duration($start);
             }
+            my $from = main::FmtDateTime(main::fronthem_Time(time(), $start));
+            my $to = main::FmtDateTime(main::fronthem_Time(time(), $end));
 
-            my $string = main::CommandGet(undef, $args[0] . ' - webchart ' . $from . ' ' . $to . ' ' . $device . ' ' . $duration . ' TIMESTAMP ' . $reading);
-            my @response = main::fronthem_decodejson($string);
+            my $use_DbRep_functions = "0";
+            if (($mode eq 'avg') && ($count > 2)) {
+                $use_DbRep_functions = "1";
+                # The SQL-query described in https://forum.fhem.de/index.php/topic,130769.msg1249925.html#msg1249925
+                # divides the [$start...$end] interval in '$count' bins and averages over each bin
+                $string = 'get '.$args[0].'Report sqlCmdBlocking SET @weighted="yes", @device = "'.$device.'", @reading = "'.$reading.'", @start = "'.$from.'", @end = "'.$to.'", @count = '.$count.';; SELECT tim, CASE WHEN @weighted="yes" THEN CAST(sum(val * (to_seconds(nexttim) - to_seconds(tim))) / sum((to_seconds(nexttim) - to_seconds(tim))) AS DECIMAL(12,4)) ELSE CAST(sum(val) / count(val) AS DECIMAL(12,4)) END AS avrg FROM ( SELECT timestamp as tim, value as val, LEAD(timestamp) over (order by timestamp) nexttim, truncate(@count * (to_seconds(timestamp) - to_seconds(@start)) / (to_seconds(@end) - to_seconds(@start)),0)/@count as avgtim FROM history WHERE TIMESTAMP BETWEEN @start AND @end AND DEVICE LIKE @device AND READING LIKE @reading ) select1 group by avgtim;';
+            }
+            if (($mode eq 'avg') && ($count == 2)) {
+                $use_DbRep_functions = "2";
 
-            foreach my $data (@response) {
+                # With $mode='avg' and $count = 2, an SQL query similar to the one used in 'get ... webchart ...' in 93_DbLog.pm
+                # is used. It is, however, modified to return a time-weighted average with an averaging interval given by $duration.
+                # A value leaking into the next averaging interval is considered proportionately in both intervals
+                # TO DO: adapt SQL query for sqLite and PostgreSQL
+
+                                ############## BEGIN assembly of SQL query ##############
+                $string = 'get '.$args[0].'Report sqlCmdBlocking SET @weighted="yes", @device="'.$device.'", @reading="'.$reading.'", @start="'.$from.'", @end="'.$to.'";; SELECT avgtim, CASE @weighted WHEN "yes" THEN CAST((SUM(val * weight)/SUM(weight)) AS DECIMAL(12,4)) ELSE CAST(sum(val) / count(val) AS DECIMAL(12,4)) END AS avrg FROM ( SELECT tim, avgtim, ';
+                if ($duration eq 'weekstats') { $string .= 'date_format(tim, "%Y-%u 00:00:00")';}
+                else { $string .= 'avgtim';  };
+                $string .= ' AS grouptim, CASE WHEN avgtim!=preavgtim THEN to_seconds(nexttim)-to_seconds(avgtim) WHEN avgtim!=nextavgtim THEN to_seconds(nextavgtim)-to_seconds(tim) ELSE to_seconds(nexttim)-to_seconds(tim) END AS weight, CASE WHEN avgtim!=preavgtim THEN CASE WHEN @weighted="yes" THEN CASE WHEN avgtim!=nextavgtim THEN (preval*(to_seconds(tim)-to_seconds(avgtim)) +  val * (to_seconds(nextavgtim) - to_seconds(tim))) / (to_seconds(nextavgtim) - to_seconds(avgtim)) ELSE (preval * (to_seconds(tim) - to_seconds(avgtim)) + val * (to_seconds(nexttim) - to_seconds(tim))) / (to_seconds(nexttim) - to_seconds(avgtim)) END ELSE val END ELSE val END AS val FROM ( SELECT tim, nexttim, val, preval, avgtim, LAG(avgtim) OVER (ORDER BY tim) AS preavgtim, LEAD(avgtim) OVER (ORDER BY tim) AS nextavgtim FROM ( SELECT timestamp AS tim, LEAD(timestamp) OVER (ORDER BY timestamp) AS nexttim, value AS val, LAG(value) OVER (ORDER BY timestamp) AS preval, ';
+                if    ($duration eq 'minutestats') {
+                    $string .= 'date_format(timestamp, "%Y-%m-%d %H:%i:00")';}
+                if    ($duration eq 'quarterhourstats') {
+                    $string .= 'concat(date_format(timestamp,"%Y-%m-%d %H:"),LPAD(15*(date_format(timestamp,"%i") div 15),2,"0"),":00")';}
+                elsif ($duration eq 'hourstats') {
+                    $string .= 'date_format(timestamp, "%Y-%m-%d %H:00:00")';}
+                elsif ($duration eq 'quarterdaystats') {
+                    $string .= 'concat(date_format(timestamp, "%Y-%m-%d "),LPAD(6*(date_format(timestamp, "%H") div 6),2,"0"),":00:00")';}
+                elsif ($duration eq 'daystats') {
+                    $string .= 'date_format(timestamp, "%Y-%m-%d 00:00:00")';}
+                elsif ($duration eq 'weekstats') {
+                    $string .= 'date_format(timestamp, "%Y-%m-%d 00:00:00")';}
+                elsif ($duration eq 'monthstats') {
+                    $string .= 'date_format(timestamp, "%Y-%m-01 00:00:00")';}
+                elsif ($duration eq 'quarteryearstats') {
+                    $string .= 'concat(date_format(timestamp, "%Y-"),LPAD(3*(date_format(timestamp, "%m") div 3),2,"0"),"-01 00:00:00")';}
+                elsif ($duration eq 'yearstats') {
+                    $string .= 'date_format(timestamp, "%Y-01-01 00:00:00")';};
+                $string .= ' AS avgtim FROM history WHERE TIMESTAMP BETWEEN @start AND @end AND DEVICE LIKE @device AND READING LIKE @reading ORDER BY timestamp ) select3 ) select2 ) select1 GROUP BY grouptim';
+
+                                ############## END assembly of SQL query ##############
+            }
+
+            if ($use_DbRep_functions ne "0") {
+                # Define a DbRep device connected to the DbLog device and set its 'sqlResultFormat' attribute to 'mline'.
+                # The name of the DbRep device is that of the DbLog device, with 'Report' appended.
+                # There is no error checking implemented yet
+                main::fhem("defmod -silent ".$args[0]."Report DbRep ".$args[0]);
+                main::fhem("attr -silent ".$args[0]."Report sqlResultFormat mline");
+
+                ############## execute the query:
+                $string = main::fhem($string,1);
+
+                ############## parse the query result:
+                my @a = split("\n",$string);
+                my @xypair; my $line;
                 my $i = 0;
-                foreach my $row (@{$data->{data}}) {
-                    if ($mode eq "raw") { # [TIMESTAMP,VALUE]
-                        push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($row->{TIMESTAMP}));
-                        push(@{$data[0]->{plotdata}[$i]}, sprintf("%#.4f", $row->{VALUE}) * 1);
+                foreach $line (@a) {
+                    @xypair = split('\|', $line);
+                    if ($xypair[1] ne "") {
+                        push(@{$data[0]->{plotdata}[$i]},  main::fronthem_TimeStamp($xypair[0]));
+                        push(@{$data[0]->{plotdata}[$i]},  sprintf("%#.4f", $xypair[1]) * 1);
+                        $i++;
                     }
-                    elsif ($mode eq "avg") { # [TIMESTAMP,AVG]
-                        push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($row->{TIMESTAMP}));
-                        push(@{$data[0]->{plotdata}[$i]}, $duration eq "timerange" ? sprintf("%#.4f", $row->{VALUE}) * 1 : sprintf("%#.4f", $row->{AVG}) * 1);
+                }
+            }
+            else { # perform the processing as in older 99_fronthemUtils.pm versions, using
+                   # the 'get ... webchart ...' function of module 93_DbLog
+                $from =~ s/ /_/ig;
+                $to =~ s/ /_/ig;
+                if ($duration eq "minutestats") {$duration="timerange"};
+                my $string = main::fhem("get "  . $args[0] . ' - webchart ' . $from . ' ' . $to . ' ' . $device . ' ' . $duration . ' TIMESTAMP ' . $reading, 1);
+                my @response = main::fronthem_decodejson($string);
+
+                foreach my $data (@response) {
+                    my $i = 0;
+                    foreach my $row (@{$data->{data}}) {
+                        if ($mode eq "raw") { # [TIMESTAMP,VALUE]
+                            push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($row->{TIMESTAMP}));
+                            push(@{$data[0]->{plotdata}[$i]}, sprintf("%#.4f", $row->{VALUE}) * 1);
+                        }
+                        elsif ($mode eq "avg") { # [TIMESTAMP,AVG]
+                            push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($row->{TIMESTAMP}));
+                            push(@{$data[0]->{plotdata}[$i]}, $duration eq "timerange" ? sprintf("%#.4f", $row->{VALUE}) * 1 : sprintf("%#.4f", $row->{AVG}) * 1);
+                        }
+                        elsif ($mode eq "sum") { # [TIMESTAMP,SUM]
+                            push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($row->{TIMESTAMP}));
+                            push(@{$data[0]->{plotdata}[$i]}, $duration eq "timerange" ? sprintf("%#.4f", $row->{VALUE}) * 1 : sprintf("%#.4f", $row->{SUM}) * 1);
+                        }
+                        elsif ($mode eq "min") { # [TIMESTAMP,MIN]
+                            push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($row->{TIMESTAMP}));
+                            push(@{$data[0]->{plotdata}[$i]}, $duration eq "timerange" ? sprintf("%#.4f", $row->{VALUE}) * 1 : sprintf("%#.4f", $row->{MIN}) * 1);
+                        }
+                        elsif ($mode eq "max") {  # [TIMESTAMP,MAX]
+                            push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($row->{TIMESTAMP}));
+                            push(@{$data[0]->{plotdata}[$i]}, $duration eq "timerange" ? sprintf("%#.4f", $row->{VALUE}) * 1 : sprintf("%#.4f", $row->{MAX}) * 1);
+                        }
+                        $i++;
                     }
-                    elsif ($mode eq "sum") { # [TIMESTAMP,SUM]
-                        push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($row->{TIMESTAMP}));
-                        push(@{$data[0]->{plotdata}[$i]}, $duration eq "timerange" ? sprintf("%#.4f", $row->{VALUE}) * 1 : sprintf("%#.4f", $row->{SUM}) * 1);
-                    }
-                    elsif ($mode eq "min") { # [TIMESTAMP,MIN]
-                        push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($row->{TIMESTAMP}));
-                        push(@{$data[0]->{plotdata}[$i]}, $duration eq "timerange" ? sprintf("%#.4f", $row->{VALUE}) * 1 : sprintf("%#.4f", $row->{MIN}) * 1);
-                    }
-                    elsif ($mode eq "max") {  # [TIMESTAMP,MAX]
-                        push(@{$data[0]->{plotdata}[$i]}, main::fronthem_TimeStamp($row->{TIMESTAMP}));
-                        push(@{$data[0]->{plotdata}[$i]}, $duration eq "timerange" ? sprintf("%#.4f", $row->{VALUE}) * 1 : sprintf("%#.4f", $row->{MAX}) * 1);
-                    }
-                    $i++;
                 }
             }
         }
+
         $param->{gads} = [@data];
         return undef;
   }
@@ -929,6 +1023,7 @@ sub Plotfile(@)
       parameter for converter: Plotfile &lt;column&gt; &lt;regex&gt;
       </li><br/>
       <li><b>UZSU</b><br>for the control objects of the UZSU-Widget in smartVISU<br>
+      parameter for converter: UZSU &lt;save&gt; (optional: save - set it to save data for WeekdayTimer,
       <b>attr global autosave</b> must be set to 1 )
       </li><br/>
     </ul>
@@ -962,6 +1057,7 @@ sub Plotfile(@)
       Parameter f&uuml;r converter: Plotfile &lt;column&gt; &lt;regex&gt;
       </li><br/>
       <li><b>UZSU</b><br>f&uuml;r Schaltzeiten-Objekte des UZSU-Widgets in smartVISU<br>
+      Parameter f&uuml;r converter: UZSU &lt;save&gt; (optional: save - Parameter angeben, wenn die Daten f&uuml;r WeekdayTimer gespeichert werden sollen,
       <b>attr global autosave</b> muss daf&uuml;r auf den Wert 1 gesetzt werden)
       </li><br/>
     </ul>
