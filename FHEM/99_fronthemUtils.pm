@@ -41,23 +41,23 @@ fronthem_TimeStamp($)
 }
 
 # evaluates smartVISU duration format with up to 4 digits (instead of 2)
-# loops through the parameter with more terms e.g. "1y 3m 5d 10h" and sum the results up
+# loops through the parameter with more terms e.g. "1y 3m 5d 10h" and sums the results up
 # Bonus: a leading term with 0 like e.g. "0w" will not contribute to the total time but it can
 # be used to select the aggregation period for aggregation modes 'avg', 'min', 'sum' etc. in sub fronthem_Duration
 sub
 fronthem_Time($$)
 {
 	my ($time, $period) = @_;
-
+    
 	# allow Unix timestamp in milliseconds as well as "now"
-	if ($period =~ /^(.*?)\s*(\d{13})/) { 
+	if ($period =~ /^(.*?)\s*(\d{13})/) {
 		return int($2/1000 + 0.5);
 	}
 	if ($period eq "now") {
 		return $time;
-	}	
+	}
 	my @periods = split(' ', $period);  # split parameters like "1y 3m 5d 10h" into an array like ("1y","3m","5d","10h")
-	foreach my $period (@periods) 	    # loop over the individual array elements
+	foreach my $period (@periods) 	    # and loop over the array elements
 	{
 		if ($period =~ /^([-+]?\d{1,4})(s|i|h|d|w|m|y)/)
 		{
@@ -97,8 +97,9 @@ fronthem_Time($$)
 }
 
 # select the database evaluation mode from first term of smartVISU duration, e.g. "0d" is daystats but "1d" is hourstats
+# available: timerange hourstats daystats weekstats monthstats yearstats
 sub
-fronthem_Duration($)    # hourstats daystats weekstats monthstats yearstats
+fronthem_Duration($)
 {
 	my ($duration) = @_;
 	if ($duration =~ /^(\d{1,4})(s|i|h|d|w|m|y)/)
@@ -146,6 +147,16 @@ fronthem_Duration($)    # hourstats daystats weekstats monthstats yearstats
 	return "timerange";
 }
 
+sub fronthem_sunrise($) {
+  my ($hour,$min,$sec) = split(/:/, sunrise_abs($_[0]));
+  return $hour . ':' . $min;
+} 
+
+sub fronthem_sunset($) {
+  my ($hour,$min,$sec) = split(/:/, sunset_abs($_[0]));
+  return $hour . ':' . $min;
+} 
+
 ###############################################################################
 #
 # Umsetzen der UZSU-Settings für ein device
@@ -160,45 +171,45 @@ fronthem_Duration($)    # hourstats daystats weekstats monthstats yearstats
 #
 #    define UZSU notify .*:uzsu:.* { UZSU_execute($NAME, $EVTPART1, 'save') }
 #
-# und folgendes Attribut setzen:
+# Damit die Einstellungen gespeichert werden können, folgendes Attribut setzen:
+# attr global autosave 1
 #
-#    attr global autosave 1
 #
 sub UZSU_execute($$;$)
 {
-	my ($device, $uzsu, $save) = @_;
+  my ($device, $uzsu, $save) = @_;
 	$uzsu = decode_json($uzsu);
 	
-	fhem('delete wdt_uzsu_'.$device.'.*');
+  fhem('delete wdt_uzsu_'.$device.'.*');
 	
-	for (my $i = 0; $i < @{$uzsu->{list}}; $i++) {
-		if ($uzsu->{list}[$i]->{active}) {
-			my %rrule = UZSU_getRrules($uzsu->{list}[$i]{rrule});
-			my $holiday = $uzsu->{list}[$i]{holiday}{weekend} && $uzsu->{list}[$i]{holiday}{workday} ? '' : $uzsu->{list}[$i]{holiday}{weekend} ? $rrule{'BYDAY'} ne '' ? ',$we' : '$we' : $uzsu->{list}[$i]{holiday}{workday} ? $rrule{'BYDAY'} ne '' ? ',!$we' : '!$we' : '';		
-			my $time = $uzsu->{list}[$i]{event} eq "time" ?  $uzsu->{list}[$i]{time} : '{'.$uzsu->{list}[$i]->{event} .'_abs("REAL",' . $uzsu->{list}[$i]->{timeOffset} * 60 . ',' . ($uzsu->{list}[$i]->{timeMin} ne '' ? '"' . $uzsu->{list}[$i]->{timeMin} . '"' : '') . ',' . ($uzsu->{list}[$i]->{timeMax} ne '' ? '"' . $uzsu->{list}[$i]->{timeMax} . '"' : '') . ')}';	
-			my $condition = UZSU_getCommand($uzsu->{list}[$i]{condition});
+  for (my $i = 0; $i < @{$uzsu->{list}}; $i++) {
+    if ($uzsu->{list}[$i]->{active}) {
+      my %rrule = UZSU_getRrules($uzsu->{list}[$i]{rrule});
+      my $holiday = $uzsu->{list}[$i]{holiday}{weekend} && $uzsu->{list}[$i]{holiday}{workday} ? '' : $uzsu->{list}[$i]{holiday}{weekend} ? $rrule{'BYDAY'} ne '' ? ',$we' : '$we' : $uzsu->{list}[$i]{holiday}{workday} ? $rrule{'BYDAY'} ne '' ? ',!$we' : '!$we' : '';
+      my $time = $uzsu->{list}[$i]{event} eq "time" ?  $uzsu->{list}[$i]{time} : '{'.$uzsu->{list}[$i]->{event} . '_abs("REAL"' . ($uzsu->{list}[$i]->{timeOffset} ne '' ? ',' . $uzsu->{list}[$i]->{timeOffset} * 60 : '') . ($uzsu->{list}[$i]->{timeMin} ne '' ? ', "' . $uzsu->{list}[$i]->{timeMin} . '"' : '') . ($uzsu->{list}[$i]->{timeMax} ne '' ? ', "' . $uzsu->{list}[$i]->{timeMax} . '"' : '') . ')}';
+      my $condition = UZSU_getCommand($uzsu->{list}[$i]{condition});
 			
-			my $weekdayTimer = $rrule{'BYDAY'} . $holiday . ($rrule{'BYDAY'} ne '' || $holiday ne '' ? "|" : '') . $time . "|" . $uzsu->{list}[$i]{value};	
-			my $delayedExec = UZSU_getCommand($uzsu->{list}[$i]{delayedExec});
-						
-			fhem('defmod wdt_uzsu_' . $device . '_' . $i . ' WeekdayTimer ' . $device . ' en ' . $weekdayTimer . $condition);
-			fhem('attr wdt_uzsu_' . $device . '_' . $i . ' room UZSU');
-			fhem('attr wdt_uzsu_' . $device . '_' . $i . ' group ' . $device);
-			fhem('setreading wdt_uzsu_' . $device . '_' . $i . ' weekdays ' . $weekdayTimer);
-			fhem('defmod rg_uzsu_' . $device . ' readingsgroup wdt_uzsu_' . $device . '.*');
-			fhem('attr rg_uzsu_' . $device . ' room UZSU');
-			if ($delayedExec) {
-				fhem('attr wdt_uzsu_' . $device . '_' . $i . ' delayedExecutionCond ' . $delayedExec);
-			}
-		}
-	}
-	if ($uzsu->{active}) {
-		fhem('attr NAME=wdt_uzsu_' . $device . '_.*' . ' disable 0');
-	}
-	else {
-		fhem('attr NAME=wdt_uzsu_' . $device . '_.*' . ' disable 1');
-	}
-	fhem('save', 1) if ($save eq 'save');	
+      my $weekdayTimer = $rrule{'BYDAY'} . $holiday . ($rrule{'BYDAY'} ne '' || $holiday ne '' ? "|" : '') . $time . "|" . $uzsu->{list}[$i]{value};	
+      my $delayedExec = UZSU_getCommand($uzsu->{list}[$i]{delayedExec});
+
+      fhem('defmod wdt_uzsu_' . $device . '_' . $i . ' WeekdayTimer ' . $device . ' en ' . $weekdayTimer . $condition);
+      fhem('attr wdt_uzsu_' . $device . '_' . $i . ' room UZSU');
+      fhem('attr wdt_uzsu_' . $device . '_' . $i . ' group ' . $device);
+      fhem('setreading wdt_uzsu_' . $device . '_' . $i . ' weekdays ' . $weekdayTimer);
+      fhem('defmod rg_uzsu_' . $device . ' readingsGroup wdt_uzsu_' . $device . '.*');
+      fhem('attr rg_uzsu_' . $device . ' room UZSU');
+      if ($delayedExec) {
+        fhem('attr wdt_uzsu_' . $device . '_' . $i . ' delayedExecutionCond ' . $delayedExec);
+      }
+    }
+  }
+  if ($uzsu->{active}) {
+    fhem('attr NAME=wdt_uzsu_' . $device . '_.*' . ' disable 0');
+  }
+  else {
+    fhem('attr NAME=wdt_uzsu_' . $device . '_.*' . ' disable 1');
+  }
+  fhem('save', 1) if ($save eq 'save');
 }
 
 ###############################################################################
@@ -214,39 +225,46 @@ sub UZSU_getRrules($)
 	foreach (@a){
 		my ($key,$val) = split(/=/, $_);
 		$hash{$key} = $val;
-	}	
-	return %hash;
+	}
+	
+	if (exists($hash{'BYDAY'}))
+	{
+		return %hash;
+	}
+	else {
+		$hash{'BYDAY'} = '';
+		return %hash;
+	}
 }
+
 
 sub UZSU_getCommand($)
 {
-	my ($command) = @_;	
-	if($command->{active} && $command->{type} ne "String")  
-	{
-		if($command->{deviceString} =~ /^AttrVal|InternalVal|ReadingsVal\("\S+"\s?,\s?"\S+"\s?,\s?"\S*"\)$/)
-		{
-			return ' (' . $command->{deviceString} . ' ' . $command->{type} . ' "' . $command->{value} . '")';
-		}
-		elsif($command->{deviceString} =~ /^Value\("\S+"\)$/)
-		{
-			return ' (' . $command->{deviceString} . ' ' . $command->{type} . ' "' . $command->{value} . '")';
-		}
-	}
-	elsif($command->{active} && $command->{type} eq "String" && $command->{deviceString} ne '')
-	{
-		if($command->{deviceString} =~ /^fhem ".+"( if\(.+\))?$/)
-		{
-			return ' {' . $command->{deviceString} . '}';
-		}
-		else
-		{
-			return ' (' . $command->{deviceString} . ')';
-		}
-	}
-	else
-	{
-		return '';
-	}
+  my ($command) = @_;
+
+  if($command->{active} && $command->{type} ne "String")
+  {
+    if($command->{deviceString} =~ /^AttrVal|InternalVal|ReadingsVal\("\S+"\s?,\s?"\S+"\s?,\s?"\S*"\)$/)
+    {
+      return ' (' . $command->{deviceString} . ' ' . $command->{type} . ' "' . $command->{value} . '")';
+    }
+    elsif($command->{deviceString} =~ /^Value\("\S+"\)$/)
+    {
+      return ' (' . $command->{deviceString} . ' ' . $command->{type} . ' "' . $command->{value} . '")';
+    }
+  }
+  elsif($command->{active} && $command->{type} eq "String" && $command->{deviceString} ne '')
+  {
+    if($command->{deviceString} =~ /^fhem ".+"( if\(.+\))?$/)
+    {
+      return ' {' . $command->{deviceString} . '}';
+    }
+    else
+    {
+      return ' (' . $command->{deviceString} . ')';
+    }
+  }
+  return '';
 }
 
 
@@ -409,7 +427,7 @@ use warnings;
 ###############################################################################
 # For use with UZSU-Widget in SV and UZSU-notify in fhem
 # Setreading a device reading using JSON conversion (gadval => reading=decode_json() => setval => encode_json(reading) )
-# the reading ("uzsu") must be created manually for each UZSU-enabled device in fhem using "setreading <device> uzsu {"active:false,"list":[]}
+# the reading ("uzsu") must be created manually for each UZSU-enabled device in fhem using "setreading <device> uzsu {"active":false,"list":[]}
 # in the fhem commandline
 ###############################################################################
 
@@ -434,8 +452,13 @@ sub UZSU(@)
   if ($param->{cmd} eq 'send')
   {
     $param->{gad} = $gad;
-	$param->{gadval} = main::fronthem_decodejson(main::ReadingsVal($device, $reading, '{}'));
-	$param->{gads} = [];
+  # we could initialize the JSON with the default but for security reasons the user should do this willingly 
+  # $param->{gadval} = main::fronthem_decodejson(main::ReadingsVal($device, $reading, '{"active": false, "list": []}'));
+    $param->{gadval} = main::fronthem_decodejson(main::ReadingsVal($device, $reading, '{}'));
+    $param->{gads} = [];
+    $param->{gadval}->{sunrise} = main::fronthem_sunrise("REAL");
+    $param->{gadval}->{sunset} = main::fronthem_sunset("REAL");
+
     return undef;
   }
   elsif ($param->{cmd} eq 'rcv')
@@ -628,9 +651,9 @@ sub Plot(@)
   
   my @args = @{$param->{args}};
   my $cache = $param->{cache};
-     
+
   return "error $gad: converter syntax: missing paramter: name of database" if (@args != 1);
-  
+
   if ($param->{cmd} eq 'get') {
     $param->{cmd} = 'send';
   }
@@ -643,7 +666,7 @@ sub Plot(@)
 			"updatemode" => $updatemode,
 			"plotdata" => [],
 		};
-			
+
 		if ($updatemode eq 'point') {
 			if ($mode eq "raw") {
 				push(@{$data[0]->{plotdata}[0]},  main::fronthem_ActualTimeStamp(main::gettimeofday()));
@@ -665,7 +688,7 @@ sub Plot(@)
 		else {			
 			my $from = main::FmtDateTime(main::fronthem_Time(time(), $start));
 			$from =~ s/ /_/ig;
-			my $to = main::FmtDateTime(main::fronthem_Time(time(), $end));			
+			my $to = main::FmtDateTime(main::fronthem_Time(time(), $end));
 			$to =~ s/ /_/ig;
 		
 			my $duration = "timerange";
@@ -811,11 +834,73 @@ sub Plotfile(@)
 1;
 
 =pod
+=item helper
+=item summary fronthem utility functions
+=item summary_DE fronthem Hilfsfunktionen
 =begin html
 
-<a name="fronthemUtils"></a>
-<h3>fronthemUtils</h3>
-<ul>
-</ul>
+  <p>
+    <a name="fronthemUtils" id="fronthemUtils"></a>
+  </p>
+  <h3>
+    fronthemUtils
+  </h3>
+  <ul>
+    This is a collection of converter functions that can be used with
+    fronthemDevice<br/>
+    </br>
+    </br>
+    <b>Defined converter functions</b><br/><br/>
+	<ul>
+	  <li><b>AnAus</b><br>invert state values an|aus to 0|1</li><br/>
+	  <li><b>Log</b><br>send readings collected in dummy device as status.log</li><br/>
+	  <li><b>NumInvert</b><br>direct invert of numerical values</li><br/>
+	  <li><b>Plot</b><br>Plot data from fhem database<br>
+	  parameter for converter: Plot &lt;name of database&gt;<br>
+	  For MySQL databases the averaging mode allows time-weighted averaging. <br>
+	  The averaging time is specified by the tmin parameter in plot.period.  <br>
+	  For details see <a href="https://forum.fhem.de/index.php/topic,118668.msg1251787.html#msg1251787 ">here</a> and other contribution in that thread
+	  </li><br/>
+	  <li><b>Plotfile</b><br>Plot data from fhem filelog<br>
+	  parameter for converter: Plotfile &lt;column&gt; &lt;regex&gt;
+	  </li><br/>
+	  <li><b>UZSU</b><br>for the control objects of the UZSU-Widget in smartVISU<br>
+      <b>attr global autosave</b> must be set to 1 )
+	  </li><br/>
+	</ul>
+  </ul>
+  
 =end html
+
+=begin html_DE
+
+  <p>
+    <a name="fronthemUtils" id="fronthemUtils"></a>
+  </p>
+  <h3>
+    fronthemUtils
+  </h3>
+  <ul>
+    Sammlung an Converter-Functionen, die mit
+    fronthemDevice eingesetzt werden k&ouml;nnen<br/>
+    </br>
+    </br>
+    <b>Converter-Functionen</b><br/><br/>
+	<ul>
+	  <li><b>AnAus</b><br>wandelt die Werte an|aus in 0|1 um und umgekehrt</li><br/>
+	  <li><b>Log</b><br>Sendet Readings, die in einem Dummy-Device gesammelt werden als status.log</li><br/>
+	  <li><b>NumInvert</b><br>wandelt numerische Werte direkt um</li><br/>
+	  <li><b>Plot</b><br>Plot-Daten aus der FHEM-Datenbank<br>
+	  Parameter f&uuml;r converter: Plot &lt;name of database&gt;
+	  </li><br/>
+	  <li><b>Plotfile</b><br>Plot-Daten aus filelog von FHEM<br>
+	  Parameter f&uuml;r converter: Plotfile &lt;column&gt; &lt;regex&gt;
+	  </li><br/>
+	  <li><b>UZSU</b><br>f&uuml;r Schaltzeiten-Objekte des UZSU-Widgets in smartVISU<br>
+	  <b>attr global autosave</b> muss daf&uuml;r auf den Wert 1 gesetzt werden)
+	  </li><br/>
+	</ul>
+  </ul>
+  
+=end html_DE
 =cut
