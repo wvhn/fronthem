@@ -1,7 +1,7 @@
 2026-02-19
 - transmit sunrise/sunset for UZSU
 - make websocket port and message size configurable
-- new JSON converter
+- new JSONdata converter
 
 2023-12-18
 - extended plot durations to allow usage of all smartVISU plot features
